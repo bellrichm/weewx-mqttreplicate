@@ -125,6 +125,7 @@ class MQTTResponder(weewx.engine.StdService):
 
     def shutDown(self):
         """Run when an engine shutdown is requested."""
+        # Todo: cleanup and test
         if self._thread:
             print("SHUTDOWN - thread initiated")
             self._thread.mqtt_client.disconnect()
