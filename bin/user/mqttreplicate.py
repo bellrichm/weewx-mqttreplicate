@@ -113,7 +113,8 @@ class MQTTSubscriber():
     pass
 
 class MQTTResponder(weewx.engine.StdService):
-    def __init__(self):
+    def __init__(self, engine, config_dict):
+        super().__init__(engine, config_dict)
         userdata = {}
         self.mqtt_options = {}
         self.mqtt_options['userdata'] = userdata
@@ -139,8 +140,9 @@ class MQTTResponder(weewx.engine.StdService):
         print('Responding on response topic:', response_topic)
         self.mqtt_client.publish(response_topic, 'response test', 0, False)
 
-class MQTTRequester(weewx.drivers.AbstractDevice):
-    def __init__(self):
+class MQTTRequester(weewx.engine.StdService):
+    def __init__(self, engine, config_dict):
+        super().__init__(engine, config_dict)
         userdata = {}
         self.mqtt_options = {}
         self.mqtt_options['userdata'] = userdata
@@ -153,9 +155,15 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
 
         self.mqtt_client = MQTTClient.get_client(self.mqtt_options)
         self.mqtt_client.on_connect = self._on_connect
+        self.mqtt_client.on_message = self._on_message        
         self.mqtt_client.connect(self.mqtt_options)
         
-    def run(self):
+        self.dbmanager = self.engine.db_binder.get_manager('wx_binding')
+        # Find out when the database was last updated.
+        self.lastgood_ts = self.dbmanager.lastGoodStamp()
+        self.bind(weewx.STARTUP, self.request_catchup)
+        
+    def request_catchup(self, event):
         properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
         properties.ResponseTopic = f'replicate/{self.mqtt_options["client_id"]}/catchup'      
         self.mqtt_client.publish('replicate/request', 'request test', 0, False, properties=properties)
@@ -165,11 +173,15 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
         userdata['connect'] = True
         self.mqtt_client.subscribe(f'replicate/{self.mqtt_options["client_id"]}/catchup', 0)
 
+    def _on_message(self, msg):
+        print('handle message')
+        # self.dbm.addRecord(record)
+
 if __name__ == '__main__':
     print('start')
-    mqtt_requester = MQTTRequester()
-    mqtt_responder = MQTTResponder()
-    mqtt_requester.run()
+    mqtt_requester = MQTTRequester(None, None)
+    mqtt_responder = MQTTResponder(None, None)
+    mqtt_requester.request_catchup(None)
     mqtt_requester.mqtt_client.client.loop(timeout=2.0)
     # proof of concept hack
     #time.sleep(5)
