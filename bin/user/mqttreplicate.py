@@ -1,5 +1,7 @@
 import abc
+import queue
 import random
+import threading
 import time
 
 import paho
@@ -57,8 +59,6 @@ class MQTTClientV2(MQTTClient):
     def connect(self, mqtt_options):
         self.client.connect(mqtt_options['host'], mqtt_options['port'], mqtt_options['keepalive'])
         #self.client.loop(timeout=0.1)
-        # needed to get on_message called, probably getting disconnected?
-        self.client.loop_start()
 
     def disconnect(self):
         """ shut it down """
@@ -106,12 +106,6 @@ class MQTTClientV2(MQTTClient):
         if self.on_message:
             self.on_message(msg)
 
-class MQTTPublisher():
-    pass
-
-class MQTTSubscriber():
-    pass
-
 class MQTTResponder(weewx.engine.StdService):
     def __init__(self, engine, config_dict):
         super().__init__(engine, config_dict)
@@ -124,22 +118,44 @@ class MQTTResponder(weewx.engine.StdService):
         self.mqtt_options['keepalive'] = 60
         self.mqtt_options['client_id'] = 'MQTTReplicate-' + str(random.randint(1000, 9999))
         self.mqtt_options['clean_start'] = False
+        
+        
+        self._thread = MQTTResponderThread(self.mqtt_options)
+        self._thread.start()
+
+    def shutDown(self):
+        """Run when an engine shutdown is requested."""
+        if self._thread:
+            print("SHUTDOWN - thread initiated")
+            self._thread.mqtt_client.disconnect()
+
+class MQTTResponderThread(threading.Thread):
+    def __init__(self, mqtt_options):
+        threading.Thread.__init__(self)
+        self.mqtt_options = mqtt_options
 
         self.mqtt_client = MQTTClient.get_client(self.mqtt_options)
         self.mqtt_client.on_connect = self._on_connect
         self.mqtt_client.on_message = self._on_message        
-        self.mqtt_client.connect(self.mqtt_options)
+        self.mqtt_client.connect(self.mqtt_options)    
         
+    def run(self):
+        print("starting loop")
+        # needed to get on_message called, probably getting disconnected?
+        self.mqtt_client.client.loop_forever()
+        print("loop ended")
+
     def _on_connect(self, userdata):
         userdata['connect'] = True
         self.mqtt_client.subscribe('replicate/request', 0)
-        #self.mqtt_client.client.loop(timeout=2.0)
             
     def _on_message(self, msg):
+        # ToDo: handle in separate thread. 
+        # The client is not threadsafe
         response_topic = msg.properties.ResponseTopic
         print('Responding on response topic:', response_topic)
         self.mqtt_client.publish(response_topic, 'response test', 0, False)
-
+  
 class MQTTRequester(weewx.engine.StdService):
     def __init__(self, engine, config_dict):
         super().__init__(engine, config_dict)
@@ -157,6 +173,9 @@ class MQTTRequester(weewx.engine.StdService):
         self.mqtt_client.on_connect = self._on_connect
         self.mqtt_client.on_message = self._on_message        
         self.mqtt_client.connect(self.mqtt_options)
+        self.mqtt_client.connect(self.mqtt_options)    
+        # needed to get on_message called, probably getting disconnected?
+        self.mqtt_client.client.loop_start()
         
         # ToDo: hack while developing
         if engine:
