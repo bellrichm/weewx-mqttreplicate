@@ -158,10 +158,12 @@ class MQTTRequester(weewx.engine.StdService):
         self.mqtt_client.on_message = self._on_message        
         self.mqtt_client.connect(self.mqtt_options)
         
-        self.dbmanager = self.engine.db_binder.get_manager('wx_binding')
-        # Find out when the database was last updated.
-        self.lastgood_ts = self.dbmanager.lastGoodStamp()
-        self.bind(weewx.STARTUP, self.request_catchup)
+        # ToDo: hack while developing
+        if engine:
+            self.dbmanager = engine.db_binder.get_manager('wx_binding')
+            # Find out when the database was last updated.
+            self.lastgood_ts = self.dbmanager.lastGoodStamp()
+            self.bind(weewx.STARTUP, self.request_catchup)
         
     def request_catchup(self, event):
         properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
@@ -180,7 +182,7 @@ class MQTTRequester(weewx.engine.StdService):
 if __name__ == '__main__':
     print('start')
     mqtt_requester = MQTTRequester(None, None)
-    mqtt_responder = MQTTResponder(None, None)
+    #mqtt_responder = MQTTResponder(None, None)
     mqtt_requester.request_catchup(None)
     mqtt_requester.mqtt_client.client.loop(timeout=2.0)
     # proof of concept hack
