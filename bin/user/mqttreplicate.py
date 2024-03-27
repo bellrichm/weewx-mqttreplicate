@@ -32,6 +32,10 @@ class MQTTClient(abc.ABC):
         ''' Connect to the MQTT server. '''
         raise NotImplementedError("Method 'loop_start' is not implemented")
 
+    def loop(self):
+        ''' Connect to the MQTT server. '''
+        raise NotImplementedError("Method 'loop' is not implemented")
+
     def loop_stop(self):
         ''' Connect to the MQTT server. '''
         raise NotImplementedError("Method 'loop_stop' is not implemented")
@@ -71,6 +75,10 @@ class MQTTClientV2(MQTTClient):
     def disconnect(self):
         """ shut it down """
         self.client.disconnect()
+
+    def loop(self):
+        """ the loop """
+        self.client.loop()
 
     def loop_start(self):
         """ start the loop """
@@ -166,10 +174,9 @@ class MQTTResponderThread(threading.Thread):
         self.mqtt_client.subscribe('replicate/request', 0)
             
     def _on_message(self, msg):
-        # ToDo: handle in separate thread. 
-        # The client is not threadsafe
         response_topic = msg.properties.ResponseTopic
         print('Responding on response topic:', response_topic)
+        # ToDo: get records from db and return them
         self.mqtt_client.publish(response_topic, 'response test', 0, False)
   
 class MQTTRequester(weewx.engine.StdService):
@@ -225,6 +232,5 @@ if __name__ == '__main__':
     mqtt_requester = MQTTRequester(None, None)
     mqtt_requester.request_catchup(None)
 
-    mqtt_requester.mqtt_client.client.loop(timeout=2.0)
     mqtt_requester.shutDown()
     print('done')
