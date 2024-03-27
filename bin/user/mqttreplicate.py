@@ -125,10 +125,9 @@ class MQTTResponder(weewx.engine.StdService):
 
     def shutDown(self):
         """Run when an engine shutdown is requested."""
-        # Todo: cleanup and test
         if self._thread:
             print("SHUTDOWN - thread initiated")
-            self._thread.mqtt_client.disconnect()
+            self._thread.shutDown()
 
 class MQTTResponderThread(threading.Thread):
     def __init__(self, mqtt_options):
@@ -138,11 +137,13 @@ class MQTTResponderThread(threading.Thread):
         self.mqtt_client = MQTTClient.get_client(self.mqtt_options)
         self.mqtt_client.on_connect = self._on_connect
         self.mqtt_client.on_message = self._on_message        
-        self.mqtt_client.connect(self.mqtt_options)    
+        self.mqtt_client.connect(self.mqtt_options)
+
+        # expose with a more appropriate name
+        self.shutDown = self.mqtt_client.disconnect
         
     def run(self):
         print("starting loop")
-        # needed to get on_message called, probably getting disconnected?
         self.mqtt_client.client.loop_forever()
         print("loop ended")
 
