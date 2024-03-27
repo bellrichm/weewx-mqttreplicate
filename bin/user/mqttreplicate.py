@@ -28,6 +28,14 @@ class MQTTClient(abc.ABC):
         ''' Connect to the MQTT server. '''
         raise NotImplementedError("Method 'disconnect' is not implemented")
 
+    def loop_start(self):
+        ''' Connect to the MQTT server. '''
+        raise NotImplementedError("Method 'loop_start' is not implemented")
+
+    def loop_stop(self):
+        ''' Connect to the MQTT server. '''
+        raise NotImplementedError("Method 'loop_stop' is not implemented")
+
     def subscribe(self, topic, qos):
         ''' Subscribe to the MQTT topic. '''
         raise NotImplementedError("Method 'subscribe' is not implemented")
@@ -62,8 +70,15 @@ class MQTTClientV2(MQTTClient):
 
     def disconnect(self):
         """ shut it down """
-        self.client.loop_stop()
         self.client.disconnect()
+
+    def loop_start(self):
+        """ start the loop """
+        self.client.loop_start()
+
+    def loop_stop(self):
+        """ stop the loop """
+        self.client.loop_stop()
         
     def subscribe(self, topic, qos):
         (result, mid) = self.client.subscribe(topic, qos)
@@ -118,7 +133,6 @@ class MQTTResponder(weewx.engine.StdService):
         self.mqtt_options['keepalive'] = 60
         self.mqtt_options['client_id'] = 'MQTTReplicate-' + str(random.randint(1000, 9999))
         self.mqtt_options['clean_start'] = False
-        
         
         self._thread = MQTTResponderThread(self.mqtt_options)
         self._thread.start()
@@ -177,7 +191,7 @@ class MQTTRequester(weewx.engine.StdService):
         self.mqtt_client.connect(self.mqtt_options)
         self.mqtt_client.connect(self.mqtt_options)    
         # needed to get on_message called, probably getting disconnected?
-        self.mqtt_client.client.loop_start()
+        self.mqtt_client.loop_start()
         
         # ToDo: hack while developing
         if engine:
@@ -185,29 +199,32 @@ class MQTTRequester(weewx.engine.StdService):
             # Find out when the database was last updated.
             self.lastgood_ts = self.dbmanager.lastGoodStamp()
             self.bind(weewx.STARTUP, self.request_catchup)
+
+    def shutDown(self):
+        """Run when an engine shutdown is requested."""
+        self.mqtt_client.loop_stop()
+        self.mqtt_client.disconnect()
         
     def request_catchup(self, event):
         properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
         properties.ResponseTopic = f'replicate/{self.mqtt_options["client_id"]}/catchup'      
         self.mqtt_client.publish('replicate/request', 'request test', 0, False, properties=properties)
-        #self.mqtt_client.client.loop(timeout=2.0)
 
     def _on_connect(self, userdata):
         userdata['connect'] = True
         self.mqtt_client.subscribe(f'replicate/{self.mqtt_options["client_id"]}/catchup', 0)
 
     def _on_message(self, msg):
-        print('handle message')
-        # self.dbm.addRecord(record)
+        print(f'handle message: {msg}')
+        # self.dbmanager.addRecord(record)
 
 if __name__ == '__main__':
     print('start')
-    mqtt_requester = MQTTRequester(None, None)
     #mqtt_responder = MQTTResponder(None, None)
+
+    mqtt_requester = MQTTRequester(None, None)
     mqtt_requester.request_catchup(None)
+
     mqtt_requester.mqtt_client.client.loop(timeout=2.0)
-    # proof of concept hack
-    #time.sleep(5)
-    #mqtt_responder.mqtt_client.disconnect()
-    #mqtt_requester.mqtt_client.disconnect()
+    mqtt_requester.shutDown()
     print('done')
