@@ -11,6 +11,8 @@ import weewx
 import weewx.drivers
 import weewx.engine
 
+from weeutil.weeutil import to_bool
+
 class MQTTClient(abc.ABC):
     @classmethod
     def get_client(cls, mqtt_options):
@@ -132,14 +134,21 @@ class MQTTClientV2(MQTTClient):
 class MQTTResponder(weewx.engine.StdService):
     def __init__(self, engine, config_dict):
         super().__init__(engine, config_dict)
+        service_dict = config_dict.get('MQTTReplicate', {}).get('Responder', {})
+
+        enable = to_bool(service_dict.get('enable', True))
+        if not enable:
+            print("Not enabled, exiting.")
+            return
+
         userdata = {}
         self.mqtt_options = {}
         self.mqtt_options['userdata'] = userdata
         self.mqtt_options['log_mqtt'] = False
-        self.mqtt_options['host'] = 'localhost'
+        self.mqtt_options['host'] = 'rmbell-v01.local'
         self.mqtt_options['port'] = 1883
         self.mqtt_options['keepalive'] = 60
-        self.mqtt_options['client_id'] = 'MQTTReplicate-' + str(random.randint(1000, 9999))
+        self.mqtt_options['client_id'] = 'MQTTReplicateRespond-' + str(random.randint(1000, 9999))
         self.mqtt_options['clean_start'] = False
         
         self._thread = MQTTResponderThread(self.mqtt_options)
@@ -182,14 +191,21 @@ class MQTTResponderThread(threading.Thread):
 class MQTTRequester(weewx.engine.StdService):
     def __init__(self, engine, config_dict):
         super().__init__(engine, config_dict)
+        service_dict = config_dict.get('MQTTReplicate', {}).get('Requester', {})
+
+        enable = to_bool(service_dict.get('enable', True))
+        if not enable:
+            print("Not enabled, exiting.")
+            return
+        
         userdata = {}
         self.mqtt_options = {}
         self.mqtt_options['userdata'] = userdata
         self.mqtt_options['log_mqtt'] = False
-        self.mqtt_options['host'] = 'localhost'
+        self.mqtt_options['host'] = 'rmbell-v01.local'
         self.mqtt_options['port'] = 1883
         self.mqtt_options['keepalive'] = 60
-        self.mqtt_options['client_id'] = 'MQTTReplicate-' + str(random.randint(1000, 9999))
+        self.mqtt_options['client_id'] = 'MQTTReplicateRequest-' + str(random.randint(1000, 9999))
         self.mqtt_options['clean_start'] = False
 
         self.mqtt_client = MQTTClient.get_client(self.mqtt_options)
