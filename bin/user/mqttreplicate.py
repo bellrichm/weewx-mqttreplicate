@@ -135,6 +135,8 @@ class MQTTResponder(weewx.engine.StdService):
     def __init__(self, engine, config_dict):
         super().__init__(engine, config_dict)
         service_dict = config_dict.get('MQTTReplicate', {}).get('Responder', {})
+        # ToDo: developer hack, hard coded wx_binding
+        _manager_dict = weewx.manager.get_manager_dict_from_config(config_dict, 'wx_binding')
 
         enable = to_bool(service_dict.get('enable', True))
         if not enable:
@@ -151,7 +153,7 @@ class MQTTResponder(weewx.engine.StdService):
         self.mqtt_options['client_id'] = 'MQTTReplicateRespond-' + str(random.randint(1000, 9999))
         self.mqtt_options['clean_start'] = False
         
-        self._thread = MQTTResponderThread(self.mqtt_options)
+        self._thread = MQTTResponderThread(engine, _manager_dict, self.mqtt_options)
         self._thread.start()
 
     def shutDown(self):
@@ -161,8 +163,10 @@ class MQTTResponder(weewx.engine.StdService):
             self._thread.shutDown()
 
 class MQTTResponderThread(threading.Thread):
-    def __init__(self, mqtt_options):
+    def __init__(self, engine, manager_dict, mqtt_options):
         threading.Thread.__init__(self)
+        self.engine = engine
+        self.manager_dict = manager_dict
         self.mqtt_options = mqtt_options
 
         self.mqtt_client = MQTTClient.get_client(self.mqtt_options)
@@ -175,7 +179,10 @@ class MQTTResponderThread(threading.Thread):
         
     def run(self):
         print("starting loop")
-        self.mqtt_client.client.loop_forever()
+        # ToDo: Hack to a get db manager for now
+        with weewx.manager.open_manager(self.manager_dict) as _manager:
+            self.dbmanager = _manager
+            self.mqtt_client.client.loop_forever()
         print("loop ended")
 
     def _on_connect(self, userdata):
@@ -184,8 +191,14 @@ class MQTTResponderThread(threading.Thread):
             
     def _on_message(self, msg):
         response_topic = msg.properties.ResponseTopic
-        print('Responding on response topic:', response_topic)
+        print('Responding on respons e topic:', response_topic)
+        start_timestamp = int(msg.payload.decode('utf-8'))
+        print(start_timestamp)
         # ToDo: get records from db and return them
+        # ToDo: hack, go back 50 minutes in time so get at least something
+        for record in self.dbmanager.genBatchRecords(start_timestamp - 3000):
+            print(record)
+
         self.mqtt_client.publish(response_topic, 'response test', 0, False)
   
 class MQTTRequester(weewx.engine.StdService):
