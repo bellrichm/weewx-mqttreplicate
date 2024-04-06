@@ -4,6 +4,7 @@ import random
 import threading
 import time
 
+import json
 import paho
 import paho.mqtt
 import paho.mqtt.client
@@ -198,6 +199,9 @@ class MQTTResponderThread(threading.Thread):
         # ToDo: hack, go back 50 minutes in time so get at least something
         for record in self.dbmanager.genBatchRecords(start_timestamp - 3000):
             print(record)
+            #json.dumps(updated_record))
+            self.mqtt_client.publish(response_topic, json.dumps(record), 0, False)
+
 
         self.mqtt_client.publish(response_topic, 'response test', 0, False)
   
