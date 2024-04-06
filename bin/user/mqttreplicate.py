@@ -209,6 +209,8 @@ class MQTTRequester(weewx.engine.StdService):
     def __init__(self, engine, config_dict):
         super().__init__(engine, config_dict)
         service_dict = config_dict.get('MQTTReplicate', {}).get('Requester', {})
+        self.manager_dict = weewx.manager.get_manager_dict_from_config(config_dict, 'wx_binding')
+        self.dbmanager = None
 
         enable = to_bool(service_dict.get('enable', True))
         if not enable:
@@ -235,9 +237,10 @@ class MQTTRequester(weewx.engine.StdService):
         
         # ToDo: hack while developing
         if engine:
-            self.dbmanager = engine.db_binder.get_manager('wx_binding')
+
+            dbmanager = weewx.manager.open_manager(self.manager_dict)
             # Find out when the database was last updated.
-            self.lastgood_ts = self.dbmanager.lastGoodStamp()
+            self.lastgood_ts = dbmanager.lastGoodStamp()
             self.bind(weewx.STARTUP, self.request_catchup)
 
     def shutDown(self):
@@ -253,10 +256,14 @@ class MQTTRequester(weewx.engine.StdService):
     def _on_connect(self, userdata):
         userdata['connect'] = True
         self.mqtt_client.subscribe(f'replicate/{self.mqtt_options["client_id"]}/catchup', 0)
+        # dbmanager needs to be created in same thread as on_message called
+        if not self.dbmanager:
+            self.dbmanager = weewx.manager.open_manager(self.manager_dict)
 
     def _on_message(self, msg):
         print(f'handle message: {msg}')
-        # self.dbmanager.addRecord(record)
+        record = json.loads(msg.payload.decode('utf-8'))
+        self.dbmanager.addRecord(record)
 
 if __name__ == '__main__':
     print('start')
