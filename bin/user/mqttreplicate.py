@@ -231,7 +231,7 @@ class MQTTRequester(weewx.engine.StdService):
     def request_catchup(self, event):
         properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
         properties.ResponseTopic = f'replicate/{self.mqtt_options["client_id"]}/catchup'      
-        self.mqtt_client.publish('replicate/request', 'request test', 0, False, properties=properties)
+        self.mqtt_client.publish('replicate/request', self.lastgood_ts, 0, False, properties=properties)
 
     def _on_connect(self, userdata):
         userdata['connect'] = True
