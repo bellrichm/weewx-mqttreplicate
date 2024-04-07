@@ -136,13 +136,14 @@ class MQTTResponder(weewx.engine.StdService):
     def __init__(self, engine, config_dict):
         super().__init__(engine, config_dict)
         service_dict = config_dict.get('MQTTReplicate', {}).get('Responder', {})
-        # ToDo: developer hack, hard coded wx_binding
-        _manager_dict = weewx.manager.get_manager_dict_from_config(config_dict, 'wx_binding')
 
         enable = to_bool(service_dict.get('enable', True))
         if not enable:
             print("Not enabled, exiting.")
             return
+
+        _data_binding = service_dict.get('data_binding', 'wx_binding')
+        _manager_dict = weewx.manager.get_manager_dict_from_config(config_dict, _data_binding)
 
         userdata = {}
         self.mqtt_options = {}
@@ -180,7 +181,6 @@ class MQTTResponderThread(threading.Thread):
         
     def run(self):
         print("starting loop")
-        # ToDo: Hack to a get db manager for now
         with weewx.manager.open_manager(self.manager_dict) as _manager:
             self.dbmanager = _manager
             self.mqtt_client.client.loop_forever()
@@ -195,13 +195,9 @@ class MQTTResponderThread(threading.Thread):
         print('Responding on respons e topic:', response_topic)
         start_timestamp = int(msg.payload.decode('utf-8'))
         print(start_timestamp)
-        # ToDo: get records from db and return them
-        # ToDo: hack, go back 50 minutes in time so get at least something
-        for record in self.dbmanager.genBatchRecords(start_timestamp - 3000):
+        for record in self.dbmanager.genBatchRecords(start_timestamp):
             print(record)
-            #json.dumps(updated_record))
             self.mqtt_client.publish(response_topic, json.dumps(record), 0, False)
-
 
         self.mqtt_client.publish(response_topic, 'response test', 0, False)
   
@@ -216,6 +212,8 @@ class MQTTRequester(weewx.engine.StdService):
         if not enable:
             print("Not enabled, exiting.")
             return
+
+        _data_binding = service_dict.get('data_binding', 'wx_binding')
         
         userdata = {}
         self.mqtt_options = {}
@@ -235,13 +233,10 @@ class MQTTRequester(weewx.engine.StdService):
         # needed to get on_message called, probably getting disconnected?
         self.mqtt_client.loop_start()
         
-        # ToDo: hack while developing
-        if engine:
-
-            dbmanager = weewx.manager.open_manager(self.manager_dict)
-            # Find out when the database was last updated.
-            self.lastgood_ts = dbmanager.lastGoodStamp()
-            self.bind(weewx.STARTUP, self.request_catchup)
+        self.dbmanager = engine.db_binder.get_manager(_data_binding)
+        # Find out when the database was last updated.
+        self.lastgood_ts = self.dbmanager.lastGoodStamp()
+        self.bind(weewx.STARTUP, self.request_catchup)
 
     def shutDown(self):
         """Run when an engine shutdown is requested."""
