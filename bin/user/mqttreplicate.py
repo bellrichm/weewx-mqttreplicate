@@ -199,8 +199,8 @@ class MQTTResponderThread(threading.Thread):
             print(record)
             self.mqtt_client.publish(response_topic, json.dumps(record), 0, False)
 
-        self.mqtt_client.publish(response_topic, 'response test', 0, False)
-  
+        print("done")
+
 class MQTTRequester(weewx.engine.StdService):
     def __init__(self, engine, config_dict):
         super().__init__(engine, config_dict)
