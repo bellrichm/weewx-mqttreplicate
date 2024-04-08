@@ -1,4 +1,5 @@
 import abc
+import logging
 import queue
 import random
 import threading
@@ -14,12 +15,33 @@ import weewx.engine
 
 from weeutil.weeutil import to_bool
 
+VERSION = '0.0.1'
+
+class Logger(object):
+    '''
+    Manage the logging
+    '''
+    def __init__(self):
+        self.log = logging.getLogger(__name__)
+
+    def logdbg(self, msg):
+        """ log debug messages """
+        self.log.debug(msg)
+
+    def loginf(self, msg):
+        """ log informational messages """
+        self.log.info(msg)
+
+    def logerr(self, msg):
+        """ log error messages """
+        self.log.error(msg)
+
 class MQTTClient(abc.ABC):
     @classmethod
-    def get_client(cls, mqtt_options):
+    def get_client(cls, logger, mqtt_options):
         ''' Factory method to get appropriate MQTTClient for paho mqtt version. '''
         if hasattr(paho.mqtt.client, 'CallbackAPIVersion'):
-            return MQTTClientV2(mqtt_options)
+            return MQTTClientV2(logger, mqtt_options)
         
         raise ValueError("paho mqtt v2 is required.")
 
@@ -53,10 +75,12 @@ class MQTTClient(abc.ABC):
         
 class MQTTClientV2(MQTTClient):
     ''' MQTTClient that communicates with paho mqtt v2. '''
-    def __init__(self, mqtt_options):
+    def __init__(self, logger, mqtt_options):
+        self.logger = logger
+        self.client_id = mqtt_options['client_id']
         self.client = paho.mqtt.client.Client(callback_api_version=paho.mqtt.client.CallbackAPIVersion.VERSION2, 
                                        protocol=paho.mqtt.client.MQTTv5,
-                                       client_id=mqtt_options['client_id'],
+                                       client_id=self.client_id,
                                        userdata=mqtt_options['userdata'])
         
         self.client.on_connect = self._on_connect
@@ -106,7 +130,7 @@ class MQTTClientV2(MQTTClient):
         print("MQTT log: %s" %msg)
         
     def _on_connect(self, _client, userdata, flags, reason_code, _properties):
-        print(f"Connected with result code {reason_code}")
+        self.logger.logdbg(f"Client {self.client_id} connected with result code {reason_code}")
         print(f"Connected with result code {int(reason_code.value)}")
         print(f"Connected flags {str(flags)}")
 
@@ -135,6 +159,7 @@ class MQTTClientV2(MQTTClient):
 class MQTTResponder(weewx.engine.StdService):
     def __init__(self, engine, config_dict):
         super().__init__(engine, config_dict)
+        self.logger = Logger()
         service_dict = config_dict.get('MQTTReplicate', {}).get('Responder', {})
 
         enable = to_bool(service_dict.get('enable', True))
@@ -155,7 +180,7 @@ class MQTTResponder(weewx.engine.StdService):
         self.mqtt_options['client_id'] = 'MQTTReplicateRespond-' + str(random.randint(1000, 9999))
         self.mqtt_options['clean_start'] = False
         
-        self._thread = MQTTResponderThread(engine, _manager_dict, self.mqtt_options)
+        self._thread = MQTTResponderThread(self.logger, engine, _manager_dict, self.mqtt_options)
         self._thread.start()
 
     def shutDown(self):
@@ -165,13 +190,14 @@ class MQTTResponder(weewx.engine.StdService):
             self._thread.shutDown()
 
 class MQTTResponderThread(threading.Thread):
-    def __init__(self, engine, manager_dict, mqtt_options):
+    def __init__(self, logger, engine, manager_dict, mqtt_options):
         threading.Thread.__init__(self)
-        self.engine = engine
+        self.logger = logger
+        #self.engine = engine
         self.manager_dict = manager_dict
         self.mqtt_options = mqtt_options
 
-        self.mqtt_client = MQTTClient.get_client(self.mqtt_options)
+        self.mqtt_client = MQTTClient.get_client(self.logger, self.mqtt_options)
         self.mqtt_client.on_connect = self._on_connect
         self.mqtt_client.on_message = self._on_message        
         self.mqtt_client.connect(self.mqtt_options)
@@ -204,6 +230,7 @@ class MQTTResponderThread(threading.Thread):
 class MQTTRequester(weewx.engine.StdService):
     def __init__(self, engine, config_dict):
         super().__init__(engine, config_dict)
+        self.logger = Logger()
         service_dict = config_dict.get('MQTTReplicate', {}).get('Requester', {})
         self.manager_dict = weewx.manager.get_manager_dict_from_config(config_dict, 'wx_binding')
         self.dbmanager = None
@@ -225,7 +252,7 @@ class MQTTRequester(weewx.engine.StdService):
         self.mqtt_options['client_id'] = 'MQTTReplicateRequest-' + str(random.randint(1000, 9999))
         self.mqtt_options['clean_start'] = False
 
-        self.mqtt_client = MQTTClient.get_client(self.mqtt_options)
+        self.mqtt_client = MQTTClient.get_client(self.logger, self.mqtt_options)
         self.mqtt_client.on_connect = self._on_connect
         self.mqtt_client.on_message = self._on_message        
         self.mqtt_client.connect(self.mqtt_options)
