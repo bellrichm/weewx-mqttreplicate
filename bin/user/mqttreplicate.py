@@ -164,7 +164,7 @@ class MQTTResponder(weewx.engine.StdService):
 
         enable = to_bool(service_dict.get('enable', True))
         if not enable:
-            print("Not enabled, exiting.")
+            self.logger.loginf("Not enabled, exiting.")
             return
 
         _data_binding = service_dict.get('data_binding', 'wx_binding')
@@ -179,21 +179,22 @@ class MQTTResponder(weewx.engine.StdService):
         self.mqtt_options['keepalive'] = 60
         self.mqtt_options['client_id'] = 'MQTTReplicateRespond-' + str(random.randint(1000, 9999))
         self.mqtt_options['clean_start'] = False
+        self.client_id = mqtt_options['client_id']
         
-        self._thread = MQTTResponderThread(self.logger, engine, _manager_dict, self.mqtt_options)
+        self._thread = MQTTResponderThread(self.logger, _manager_dict, self.mqtt_options)
         self._thread.start()
 
     def shutDown(self):
         """Run when an engine shutdown is requested."""
         if self._thread:
-            print("SHUTDOWN - thread initiated")
+            self.logger.loginf("Client {self.client_id} SHUTDOWN - thread initiated")
             self._thread.shutDown()
 
 class MQTTResponderThread(threading.Thread):
-    def __init__(self, logger, engine, manager_dict, mqtt_options):
+    def __init__(self, logger, manager_dict, mqtt_options):
         threading.Thread.__init__(self)
         self.logger = logger
-        #self.engine = engine
+        self.client_id = mqtt_options['client_id']
         self.manager_dict = manager_dict
         self.mqtt_options = mqtt_options
 
@@ -201,16 +202,17 @@ class MQTTResponderThread(threading.Thread):
         self.mqtt_client.on_connect = self._on_connect
         self.mqtt_client.on_message = self._on_message        
         self.mqtt_client.connect(self.mqtt_options)
-
-        # expose with a more appropriate name
-        self.shutDown = self.mqtt_client.disconnect
         
     def run(self):
-        print("starting loop")
+        self.logger.logdbg("Client {self.client_id} starting MQTT loop")
         with weewx.manager.open_manager(self.manager_dict) as _manager:
             self.dbmanager = _manager
             self.mqtt_client.client.loop_forever()
-        print("loop ended")
+        self.logger.logdbg("Client {self.client_id} MQTT loop ended.")
+
+    def shutDown(self):
+        self.logger.loginf('Client {self.client_id} shutting down the MQTT client.')
+        self.mqtt_client.disconnect()
 
     def _on_connect(self, userdata):
         userdata['connect'] = True
@@ -218,14 +220,13 @@ class MQTTResponderThread(threading.Thread):
             
     def _on_message(self, msg):
         response_topic = msg.properties.ResponseTopic
-        print('Responding on respons e topic:', response_topic)
-        start_timestamp = int(msg.payload.decode('utf-8'))
-        print(start_timestamp)
+        self.logger.logdbg(f'Client {self.client_id} received msg: {msg}')
+        start_timestamp = int(msg.payload.decode('utf-8'))        
+        self.logger.logdbg('Responding on response topic:', response_topic)
         for record in self.dbmanager.genBatchRecords(start_timestamp):
-            print(record)
-            self.mqtt_client.publish(response_topic, json.dumps(record), 0, False)
-
-        print("done")
+            payload = json.dumps(record)
+            self.logger.logdbg(f'Client {self.client_id} response is: {payload}.')
+            self.mqtt_client.publish(response_topic, payload, 0, False)
 
 class MQTTRequester(weewx.engine.StdService):
     def __init__(self, engine, config_dict):
