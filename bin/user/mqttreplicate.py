@@ -83,18 +83,18 @@ class MQTTClientV2(MQTTClient):
                                        client_id=self.client_id,
                                        userdata=mqtt_options['userdata'])
         
-        self._on_connect_property = None
+        self._on_connect = None
         self.on_connect = None
-        self.client.on_disconnect = self._on_disconnect
+        self.client.on_disconnect = self._client_on_disconnect
         self.on_disconnect = None        
 
-        self.client.on_message = self._on_message        
+        self.client.on_message = self._client_on_message        
         self.on_message = None
-        self.client.on_publish = self._on_publish        
+        self.client.on_publish = self._client_on_publish        
         self.on_publish = None    
         
         if mqtt_options['log_mqtt']:
-            self.client.on_log = self._on_log
+            self.client.on_log = self._client_on_log
     
     def connect(self, mqtt_options):
         self.client.connect(mqtt_options['host'], mqtt_options['port'], mqtt_options['keepalive'])
@@ -128,17 +128,17 @@ class MQTTClientV2(MQTTClient):
 
     @property
     def on_connect(self):
-        return self._on_connect_property
+        return self._on_connect
         
     @on_connect.setter
     def on_connect(self, value):
-        self._on_connect_property = value
+        self._on_connect = value
         if value:
-            self.client.on_connect = self._on_connect
+            self.client.on_connect = self._client_on_connect
         else:
             self.client.on_connect = None
 
-    def _on_connect(self, _client, userdata, flags, reason_code, _properties):
+    def _client_on_connect(self, _client, userdata, flags, reason_code, _properties):
         self.logger.logdbg(f"Client {self.client_id} connected with result code {reason_code}")
         print(f"Connected with result code {int(reason_code.value)}")
         print(f"Connected flags {str(flags)}")
@@ -147,24 +147,24 @@ class MQTTClientV2(MQTTClient):
     
     #def on_connect_fail(client, userdata):
 
-    def _on_disconnect(self, _client, userdata, _flags, reason_code, _properties):
+    def _client_on_disconnect(self, _client, userdata, _flags, reason_code, _properties):
         print("Disconnected with result code %i" % int(reason_code.value))
         if self.on_disconnect:
             self.on_disconnect(userdata)
 
-    def _on_log(self, _client, userdata, level, msg):
+    def _client_on_log(self, _client, userdata, level, msg):
         """ The on_log callback. """
         print("MQTT log: %s" %msg)
         if self.on_log:
             self.on_log(userdata, level, msg)        
 
-    def _on_message(self, client, userdata, msg):
+    def _client_on_message(self, client, userdata, msg):
         print(f"topic: {msg.topic}, QOS: {int(msg.qos)}, retain: {msg.retain}, payload: {msg.payload} properties: {msg.properties}")
 
         if self.on_message:
             self.on_message(userdata, msg)
 
-    def _on_publish(self, _client, userdata, mid, reason_codes, properties):
+    def _client_on_publish(self, _client, userdata, mid, reason_codes, properties):
         """ The on_publish callback. """
         print("Published  (%s): %s" % (int(time.time()), mid))
         if self.on_publish:
