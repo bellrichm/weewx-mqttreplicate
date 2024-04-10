@@ -83,14 +83,15 @@ class MQTTClientV2(MQTTClient):
                                        client_id=self.client_id,
                                        userdata=mqtt_options['userdata'])
         
-        self.client.on_connect = self._on_connect
+        self._on_connect_property = None
         self.on_connect = None
         self.client.on_disconnect = self._on_disconnect
         self.on_disconnect = None        
-        self.client.on_publish = self._on_publish        
-        self.on_publish = None
+
         self.client.on_message = self._on_message        
         self.on_message = None
+        self.client.on_publish = self._on_publish        
+        self.on_publish = None    
         
         if mqtt_options['log_mqtt']:
             self.client.on_log = self._on_log
@@ -125,24 +126,43 @@ class MQTTClientV2(MQTTClient):
         print("Publishing (%s): %s %s %s" % (int(time.time()), mqtt_message_info.mid, qos, topic))
         #self.client.loop(timeout=0.1)
 
-    def _on_log(self, _client, _userdata, level, msg):
-        """ The on_log callback. """
-        print("MQTT log: %s" %msg)
+    @property
+    def on_connect(self):
+        return self._on_connect_property
         
+    @on_connect.setter
+    def on_connect(self, value):
+        self._on_connect_property = value
+        if value:
+            self.client.on_connect = self._on_connect
+        else:
+            self.client.on_connect = None
+
     def _on_connect(self, _client, userdata, flags, reason_code, _properties):
         self.logger.logdbg(f"Client {self.client_id} connected with result code {reason_code}")
         print(f"Connected with result code {int(reason_code.value)}")
         print(f"Connected flags {str(flags)}")
-
-        userdata['connect'] = True
-
         if self.on_connect:
             self.on_connect(userdata)
     
+    #def on_connect_fail(client, userdata):
+
     def _on_disconnect(self, _client, userdata, _flags, reason_code, _properties):
         print("Disconnected with result code %i" % int(reason_code.value))
         if self.on_disconnect:
             self.on_disconnect(userdata)
+
+    def _on_log(self, _client, userdata, level, msg):
+        """ The on_log callback. """
+        print("MQTT log: %s" %msg)
+        if self.on_log:
+            self.on_log(userdata, level, msg)        
+
+    def _on_message(self, client, userdata, msg):
+        print(f"topic: {msg.topic}, QOS: {int(msg.qos)}, retain: {msg.retain}, payload: {msg.payload} properties: {msg.properties}")
+
+        if self.on_message:
+            self.on_message(userdata, msg)
 
     def _on_publish(self, _client, userdata, mid, reason_codes, properties):
         """ The on_publish callback. """
@@ -150,11 +170,7 @@ class MQTTClientV2(MQTTClient):
         if self.on_publish:
             self.on_publish(userdata)
 
-    def _on_message(self, client, userdata, msg):
-        print(f"topic: {msg.topic}, QOS: {int(msg.qos)}, retain: {msg.retain}, payload: {msg.payload} properties: {msg.properties}")
-
-        if self.on_message:
-            self.on_message(msg)
+    #def _on_subscribe(client, userdata, mid, reason_code_list, properties):
 
 class MQTTResponder(weewx.engine.StdService):
     def __init__(self, engine, config_dict):
@@ -218,7 +234,7 @@ class MQTTResponderThread(threading.Thread):
         userdata['connect'] = True
         self.mqtt_client.subscribe('replicate/request', 0)
             
-    def _on_message(self, msg):
+    def _on_message(self, userdata, msg):
         response_topic = msg.properties.ResponseTopic
         self.logger.logdbg(f'Client {self.client_id} received msg: {msg}')
         start_timestamp = int(msg.payload.decode('utf-8'))        
@@ -283,7 +299,7 @@ class MQTTRequester(weewx.engine.StdService):
         if not self.dbmanager:
             self.dbmanager = weewx.manager.open_manager(self.manager_dict)
 
-    def _on_message(self, msg):
+    def _on_message(self, userdata, msg):
         print(f'handle message: {msg}')
         record = json.loads(msg.payload.decode('utf-8'))
         self.dbmanager.addRecord(record)
