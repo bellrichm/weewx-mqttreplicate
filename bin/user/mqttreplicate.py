@@ -42,7 +42,7 @@ class MQTTClient(abc.ABC):
         ''' Factory method to get appropriate MQTTClient for paho mqtt version. '''
         if hasattr(paho.mqtt.client, 'CallbackAPIVersion'):
             return MQTTClientV2(logger, mqtt_options)
-        
+
         raise ValueError("paho mqtt v2 is required.")
 
     def connect(self, mqtt_options):
@@ -68,21 +68,21 @@ class MQTTClient(abc.ABC):
     def subscribe(self, topic, qos):
         ''' Subscribe to the MQTT topic. '''
         raise NotImplementedError("Method 'subscribe' is not implemented")
-       
+
     def publish(self, topic, data, qos, retain, properties=None):
         ''' Publish the MQTT message. '''
         raise NotImplementedError("Method 'publish' is not implemented")
-        
+
 class MQTTClientV2(MQTTClient):
     ''' MQTTClient that communicates with paho mqtt v2. '''
     def __init__(self, logger, mqtt_options):
         self.logger = logger
         self.client_id = mqtt_options['client_id']
-        self.client = paho.mqtt.client.Client(callback_api_version=paho.mqtt.client.CallbackAPIVersion.VERSION2, 
+        self.client = paho.mqtt.client.Client(callback_api_version=paho.mqtt.client.CallbackAPIVersion.VERSION2,
                                        protocol=paho.mqtt.client.MQTTv5,
                                        client_id=self.client_id,
                                        userdata=mqtt_options['userdata'])
-        
+
         self._on_connect = None
         self._on_connect_fail = None
         self._on_disconnect = None
@@ -90,13 +90,13 @@ class MQTTClientV2(MQTTClient):
         self._on_message = None
         self._on_publish = None
         self._on_subscribe = None
-        
+
     # Properties for each supported callback
 
     @property
     def on_connect(self):
         return self._on_connect
-        
+
     @on_connect.setter
     def on_connect(self, value):
         self._on_connect = value
@@ -108,7 +108,7 @@ class MQTTClientV2(MQTTClient):
     @property
     def on_connect_fail(self):
         return self._on_connect_fail
-        
+
     @on_connect_fail.setter
     def on_connect_fail(self, value):
         self._on_connect_fail = value
@@ -120,19 +120,19 @@ class MQTTClientV2(MQTTClient):
     @property
     def on_disconnect(self):
         return self._on_disconnect
-        
+
     @on_disconnect.setter
     def on_disconnect(self, value):
         self._on_disconnect = value
         if value:
             self.client.on_disconnect = self._client_on_disconnect
         else:
-            self.client.on_disconnect = None    
+            self.client.on_disconnect = None
 
     @property
     def on_log(self):
         return self._on_log
-        
+
     @on_log.setter
     def on_log(self, value):
         self._on_log = value
@@ -144,7 +144,7 @@ class MQTTClientV2(MQTTClient):
     @property
     def on_message(self):
         return self._on_message
-        
+
     @on_message.setter
     def on_message(self, value):
         self._on_message = value
@@ -156,7 +156,7 @@ class MQTTClientV2(MQTTClient):
     @property
     def on_publish(self):
         return self._on_publish
-        
+
     @on_publish.setter
     def on_publish(self, value):
         self._on_publish = value
@@ -168,7 +168,7 @@ class MQTTClientV2(MQTTClient):
     @property
     def on_subscribe(self):
         return self._on_subscribe
-        
+
     @on_subscribe.setter
     def on_subscribe(self, value):
         self._on_subscribe = value
@@ -198,12 +198,12 @@ class MQTTClientV2(MQTTClient):
     def loop_stop(self):
         """ stop the loop """
         self.client.loop_stop()
-        
+
     def subscribe(self, topic, qos):
         (result, mid) = self.client.subscribe(topic, qos)
         print(f"Subscribing to {topic} has a mid {int(mid)} and rc {int(result)}")
         #self.client.loop(timeout=0.1)
-       
+
     def publish(self, topic, data, qos, retain, properties=None):
         mqtt_message_info = self.client.publish(topic, data, qos, retain, properties)
         print("Publishing (%s): %s %s %s" % (int(time.time()), mqtt_message_info.mid, qos, topic))
@@ -216,7 +216,7 @@ class MQTTClientV2(MQTTClient):
         print(f"Connected with result code {int(reason_code.value)}")
         print(f"Connected flags {str(flags)}")
         self._on_connect(userdata)
-    
+
     def _client_on_connect_fail(self, client, userdata):
         self._on_connect_fail(userdata)
 
@@ -227,7 +227,7 @@ class MQTTClientV2(MQTTClient):
     def _client_on_log(self, _client, userdata, level, msg):
         """ The on_log callback. """
         print("MQTT log: %s" %msg)
-        self._on_log(userdata, level, msg)        
+        self._on_log(userdata, level, msg)
 
     def _client_on_message(self, client, userdata, msg):
         print(f"topic: {msg.topic}, QOS: {int(msg.qos)}, retain: {msg.retain}, payload: {msg.payload} properties: {msg.properties}")
@@ -265,7 +265,7 @@ class MQTTResponder(weewx.engine.StdService):
         self.mqtt_options['client_id'] = 'MQTTReplicateRespond-' + str(random.randint(1000, 9999))
         self.mqtt_options['clean_start'] = False
         self.client_id = self.mqtt_options['client_id']
-        
+
         self._thread = MQTTResponderThread(self.logger, _manager_dict, self.mqtt_options)
         self._thread.start()
 
@@ -285,9 +285,9 @@ class MQTTResponderThread(threading.Thread):
 
         self.mqtt_client = MQTTClient.get_client(self.logger, self.mqtt_options)
         self.mqtt_client.on_connect = self._on_connect
-        self.mqtt_client.on_message = self._on_message        
+        self.mqtt_client.on_message = self._on_message
         self.mqtt_client.connect(self.mqtt_options)
-        
+
     def run(self):
         self.logger.logdbg(f"Client {self.client_id} starting MQTT loop")
         with weewx.manager.open_manager(self.manager_dict) as _manager:
@@ -302,11 +302,11 @@ class MQTTResponderThread(threading.Thread):
     def _on_connect(self, userdata):
         userdata['connect'] = True
         self.mqtt_client.subscribe('replicate/request', 0)
-            
+
     def _on_message(self, userdata, msg):
         response_topic = msg.properties.ResponseTopic
         self.logger.logdbg(f'Client {self.client_id} received msg: {msg}')
-        start_timestamp = int(msg.payload.decode('utf-8'))        
+        start_timestamp = int(msg.payload.decode('utf-8'))
         self.logger.logdbg('Responding on response topic:', response_topic)
         for record in self.dbmanager.genBatchRecords(start_timestamp):
             payload = json.dumps(record)
@@ -327,7 +327,7 @@ class MQTTRequester(weewx.engine.StdService):
             return
 
         _data_binding = service_dict.get('data_binding', 'wx_binding')
-        
+
         userdata = {}
         self.mqtt_options = {}
         self.mqtt_options['userdata'] = userdata
@@ -340,12 +340,12 @@ class MQTTRequester(weewx.engine.StdService):
 
         self.mqtt_client = MQTTClient.get_client(self.logger, self.mqtt_options)
         self.mqtt_client.on_connect = self._on_connect
-        self.mqtt_client.on_message = self._on_message        
+        self.mqtt_client.on_message = self._on_message
         self.mqtt_client.connect(self.mqtt_options)
-        self.mqtt_client.connect(self.mqtt_options)    
+        self.mqtt_client.connect(self.mqtt_options)
         # needed to get on_message called, probably getting disconnected?
         self.mqtt_client.loop_start()
-        
+
         self.dbmanager = engine.db_binder.get_manager(_data_binding)
         # Find out when the database was last updated.
         self.lastgood_ts = self.dbmanager.lastGoodStamp()
@@ -355,10 +355,10 @@ class MQTTRequester(weewx.engine.StdService):
         """Run when an engine shutdown is requested."""
         self.mqtt_client.loop_stop()
         self.mqtt_client.disconnect()
-        
+
     def request_catchup(self, event):
         properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
-        properties.ResponseTopic = f'replicate/{self.mqtt_options["client_id"]}/catchup'      
+        properties.ResponseTopic = f'replicate/{self.mqtt_options["client_id"]}/catchup'
         self.mqtt_client.publish('replicate/request', self.lastgood_ts, 0, False, properties=properties)
 
     def _on_connect(self, userdata):
