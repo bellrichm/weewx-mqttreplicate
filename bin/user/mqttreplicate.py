@@ -84,19 +84,12 @@ class MQTTClientV2(MQTTClient):
                                        userdata=mqtt_options['userdata'])
         
         self._on_connect = None
-        self.on_connect = None
         self._on_connect_fail = None
-        self.on_connect_fail = None
         self._on_disconnect = None
-        self.on_disconnect = None
         self._on_log = None
-        self.on_log = None
         self._on_message = None
-        self.on_message = None
         self._on_publish = None
-        self.on_publish = None
         self._on_subscribe = None
-        self.on_subscribe = None
         
     # Properties for each supported callback
 
