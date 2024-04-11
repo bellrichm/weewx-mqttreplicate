@@ -85,17 +85,107 @@ class MQTTClientV2(MQTTClient):
         
         self._on_connect = None
         self.on_connect = None
-        self.client.on_disconnect = self._client_on_disconnect
-        self.on_disconnect = None        
-
-        self.client.on_message = self._client_on_message        
+        self._on_connect_fail = None
+        self.on_connect_fail = None
+        self._on_disconnect = None
+        self.on_disconnect = None
+        self._on_log = None
+        self.on_log = None
+        self._on_message = None
         self.on_message = None
-        self.client.on_publish = self._client_on_publish        
-        self.on_publish = None    
+        self._on_publish = None
+        self.on_publish = None
+        self._on_subscribe = None
+        self.on_subscribe = None
         
-        if mqtt_options['log_mqtt']:
+    # Properties for each supported callback
+
+    @property
+    def on_connect(self):
+        return self._on_connect
+        
+    @on_connect.setter
+    def on_connect(self, value):
+        self._on_connect = value
+        if value:
+            self.client.on_connect = self._client_on_connect
+        else:
+            self.client.on_connect = None
+
+    @property
+    def on_connect_fail(self):
+        return self._on_connect_fail
+        
+    @on_connect_fail.setter
+    def on_connect_fail(self, value):
+        self._on_connect_fail = value
+        if value:
+            self.client.on_connect_fail = self._client_on_connect_fail
+        else:
+            self.client.on_connect_fail = None
+
+    @property
+    def on_disconnect(self):
+        return self._on_disconnect
+        
+    @on_disconnect.setter
+    def on_disconnect(self, value):
+        self._on_disconnect = value
+        if value:
+            self.client.on_disconnect = self._client_on_disconnect
+        else:
+            self.client.on_disconnect = None    
+
+    @property
+    def on_log(self):
+        return self._on_log
+        
+    @on_log.setter
+    def on_log(self, value):
+        self._on_log = value
+        if value:
             self.client.on_log = self._client_on_log
-    
+        else:
+            self.client.on_log = None
+
+    @property
+    def on_message(self):
+        return self._on_message
+        
+    @on_message.setter
+    def on_message(self, value):
+        self._on_message = value
+        if value:
+            self.client.on_message = self._client_on_message
+        else:
+            self.client.on_message = None
+
+    @property
+    def on_publish(self):
+        return self._on_publish
+        
+    @on_publish.setter
+    def on_publish(self, value):
+        self._on_publish = value
+        if value:
+            self.client.on_publish = self._client_on_publish
+        else:
+            self.client.on_publish = None
+
+    @property
+    def on_subscribe(self):
+        return self._on_subscribe
+        
+    @on_subscribe.setter
+    def on_subscribe(self, value):
+        self._on_subscribe = value
+        if value:
+            self.client.on_subscribe = self._client_on_subscribe
+        else:
+            self.client.on_subscribe = None
+
+    # The wrappers of the  client methods are next
+
     def connect(self, mqtt_options):
         self.client.connect(mqtt_options['host'], mqtt_options['port'], mqtt_options['keepalive'])
         #self.client.loop(timeout=0.1)
@@ -126,51 +216,37 @@ class MQTTClientV2(MQTTClient):
         print("Publishing (%s): %s %s %s" % (int(time.time()), mqtt_message_info.mid, qos, topic))
         #self.client.loop(timeout=0.1)
 
-    @property
-    def on_connect(self):
-        return self._on_connect
-        
-    @on_connect.setter
-    def on_connect(self, value):
-        self._on_connect = value
-        if value:
-            self.client.on_connect = self._client_on_connect
-        else:
-            self.client.on_connect = None
+    # The  wrappers of the callbacks are next
 
     def _client_on_connect(self, _client, userdata, flags, reason_code, _properties):
         self.logger.logdbg(f"Client {self.client_id} connected with result code {reason_code}")
         print(f"Connected with result code {int(reason_code.value)}")
         print(f"Connected flags {str(flags)}")
-        if self.on_connect:
-            self.on_connect(userdata)
+        self.on_connect(userdata)
     
-    #def on_connect_fail(client, userdata):
+    def _client_on_connect_fail(self, client, userdata):
+        self.on_connect_fail(userdata)
 
     def _client_on_disconnect(self, _client, userdata, _flags, reason_code, _properties):
         print("Disconnected with result code %i" % int(reason_code.value))
-        if self.on_disconnect:
-            self.on_disconnect(userdata)
+        self.on_disconnect(userdata)
 
     def _client_on_log(self, _client, userdata, level, msg):
         """ The on_log callback. """
         print("MQTT log: %s" %msg)
-        if self.on_log:
-            self.on_log(userdata, level, msg)        
+        self.on_log(userdata, level, msg)        
 
     def _client_on_message(self, client, userdata, msg):
         print(f"topic: {msg.topic}, QOS: {int(msg.qos)}, retain: {msg.retain}, payload: {msg.payload} properties: {msg.properties}")
-
-        if self.on_message:
-            self.on_message(userdata, msg)
+        self.on_message(userdata, msg)
 
     def _client_on_publish(self, _client, userdata, mid, reason_codes, properties):
         """ The on_publish callback. """
         print("Published  (%s): %s" % (int(time.time()), mid))
-        if self.on_publish:
-            self.on_publish(userdata)
+        self.on_publish(userdata)
 
-    #def _on_subscribe(client, userdata, mid, reason_code_list, properties):
+    def _client_on_subscribe(self, client, userdata, mid, reason_code_list, properties):
+        self.on_subscribe(userdata, mid)
 
 class MQTTResponder(weewx.engine.StdService):
     def __init__(self, engine, config_dict):
