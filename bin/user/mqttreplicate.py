@@ -1,6 +1,6 @@
+''' Replicate WeeWX dstabases using MQTT request/response functionality.'''
 import abc
 import logging
-import queue
 import random
 import threading
 import time
@@ -17,10 +17,8 @@ from weeutil.weeutil import to_bool
 
 VERSION = '0.0.1'
 
-class Logger(object):
-    '''
-    Manage the logging
-    '''
+class Logger():
+    ''' Manage the logging '''
     def __init__(self):
         self.log = logging.getLogger(__name__)
 
@@ -37,6 +35,7 @@ class Logger(object):
         self.log.error(msg)
 
 class MQTTClient(abc.ABC):
+    ''' Abstract class that wraps paho mqtt to protect from breaking changes. '''
     @classmethod
     def get_client(cls, logger, mqtt_options):
         ''' Factory method to get appropriate MQTTClient for paho mqtt version. '''
@@ -78,10 +77,11 @@ class MQTTClientV2(MQTTClient):
     def __init__(self, logger, mqtt_options):
         self.logger = logger
         self.client_id = mqtt_options['client_id']
-        self.client = paho.mqtt.client.Client(callback_api_version=paho.mqtt.client.CallbackAPIVersion.VERSION2,
-                                       protocol=paho.mqtt.client.MQTTv5,
-                                       client_id=self.client_id,
-                                       userdata=mqtt_options['userdata'])
+        self.client = paho.mqtt.client.Client(
+            callback_api_version=paho.mqtt.client.CallbackAPIVersion.VERSION2,
+            protocol=paho.mqtt.client.MQTTv5,
+            client_id=self.client_id,
+            userdata=mqtt_options['userdata'])
 
         self._on_connect = None
         self._on_connect_fail = None
@@ -95,6 +95,7 @@ class MQTTClientV2(MQTTClient):
 
     @property
     def on_connect(self):
+        ''' The on_connect call back function. '''
         return self._on_connect
 
     @on_connect.setter
@@ -107,6 +108,7 @@ class MQTTClientV2(MQTTClient):
 
     @property
     def on_connect_fail(self):
+        ''' The on_connect_fail call back function. '''
         return self._on_connect_fail
 
     @on_connect_fail.setter
@@ -119,6 +121,7 @@ class MQTTClientV2(MQTTClient):
 
     @property
     def on_disconnect(self):
+        ''' The on_disconnect call back function. '''
         return self._on_disconnect
 
     @on_disconnect.setter
@@ -131,6 +134,7 @@ class MQTTClientV2(MQTTClient):
 
     @property
     def on_log(self):
+        ''' The on_log call back function. '''
         return self._on_log
 
     @on_log.setter
@@ -143,6 +147,7 @@ class MQTTClientV2(MQTTClient):
 
     @property
     def on_message(self):
+        ''' The on_message call back function. '''
         return self._on_message
 
     @on_message.setter
@@ -155,6 +160,7 @@ class MQTTClientV2(MQTTClient):
 
     @property
     def on_publish(self):
+        ''' The on_publish call back function. '''
         return self._on_publish
 
     @on_publish.setter
@@ -167,6 +173,7 @@ class MQTTClientV2(MQTTClient):
 
     @property
     def on_subscribe(self):
+        ''' The on_subscribe call back function. '''
         return self._on_subscribe
 
     @on_subscribe.setter
@@ -206,7 +213,7 @@ class MQTTClientV2(MQTTClient):
 
     def publish(self, topic, data, qos, retain, properties=None):
         mqtt_message_info = self.client.publish(topic, data, qos, retain, properties)
-        print("Publishing (%s): %s %s %s" % (int(time.time()), mqtt_message_info.mid, qos, topic))
+        print(f"Publishing ({int(time.time())}): {mqtt_message_info.mid} {qos} {topic}")
         #self.client.loop(timeout=0.1)
 
     # The  wrappers of the callbacks are next
@@ -217,31 +224,32 @@ class MQTTClientV2(MQTTClient):
         print(f"Connected flags {str(flags)}")
         self._on_connect(userdata)
 
-    def _client_on_connect_fail(self, client, userdata):
+    def _client_on_connect_fail(self, _client, userdata):
         self._on_connect_fail(userdata)
 
     def _client_on_disconnect(self, _client, userdata, _flags, reason_code, _properties):
-        print("Disconnected with result code %i" % int(reason_code.value))
+        print(f"Disconnected with result code {reason_code.value}")
         self._on_disconnect(userdata)
 
     def _client_on_log(self, _client, userdata, level, msg):
         """ The on_log callback. """
-        print("MQTT log: %s" %msg)
+        print(f"MQTT log: {msg}")
         self._on_log(userdata, level, msg)
 
-    def _client_on_message(self, client, userdata, msg):
+    def _client_on_message(self, _client, userdata, msg):
         print(f"topic: {msg.topic}, QOS: {int(msg.qos)}, retain: {msg.retain}, payload: {msg.payload} properties: {msg.properties}")
         self._on_message(userdata, msg)
 
-    def _client_on_publish(self, _client, userdata, mid, reason_codes, properties):
+    def _client_on_publish(self, _client, userdata, mid, _reason_codes, _properties):
         """ The on_publish callback. """
-        print("Published  (%s): %s" % (int(time.time()), mid))
+        print(f"Published  ({int(time.time())}): {mid}")
         self._on_publish(userdata)
 
-    def _client_on_subscribe(self, client, userdata, mid, reason_code_list, properties):
+    def _client_on_subscribe(self, _client, userdata, mid, _reason_code_list, _properties):
         self._on_subscribe(userdata, mid)
 
 class MQTTResponder(weewx.engine.StdService):
+    ''' The "server" that sends the replication data to the requester/client. '''
     def __init__(self, engine, config_dict):
         super().__init__(engine, config_dict)
         self.logger = Logger()
@@ -276,6 +284,7 @@ class MQTTResponder(weewx.engine.StdService):
             self._thread.shutDown()
 
 class MQTTResponderThread(threading.Thread):
+    ''' Manage the MQTT communication for the "server" that sends the data. '''
     def __init__(self, logger, manager_dict, mqtt_options):
         threading.Thread.__init__(self)
         self.logger = logger
@@ -296,6 +305,7 @@ class MQTTResponderThread(threading.Thread):
         self.logger.logdbg(f"Client {self.client_id} MQTT loop ended.")
 
     def shutDown(self):
+        ''' Perform operations to terminate MQTT.'''
         self.logger.loginf(f'Client {self.client_id} shutting down the MQTT client.')
         self.mqtt_client.disconnect()
 
@@ -303,7 +313,7 @@ class MQTTResponderThread(threading.Thread):
         userdata['connect'] = True
         self.mqtt_client.subscribe('replicate/request', 0)
 
-    def _on_message(self, userdata, msg):
+    def _on_message(self, _userdata, msg):
         response_topic = msg.properties.ResponseTopic
         self.logger.logdbg(f'Client {self.client_id} received msg: {msg}')
         start_timestamp = int(msg.payload.decode('utf-8'))
@@ -314,6 +324,7 @@ class MQTTResponderThread(threading.Thread):
             self.mqtt_client.publish(response_topic, payload, 0, False)
 
 class MQTTRequester(weewx.engine.StdService):
+    ''' The "client" class that data ts replicated to. '''
     def __init__(self, engine, config_dict):
         super().__init__(engine, config_dict)
         self.logger = Logger()
@@ -349,17 +360,21 @@ class MQTTRequester(weewx.engine.StdService):
         self.dbmanager = engine.db_binder.get_manager(_data_binding)
         # Find out when the database was last updated.
         self.lastgood_ts = self.dbmanager.lastGoodStamp()
-        self.bind(weewx.STARTUP, self.request_catchup)
+        self.bind(weewx.STARTUP, self._request_catchup)
 
     def shutDown(self):
         """Run when an engine shutdown is requested."""
         self.mqtt_client.loop_stop()
         self.mqtt_client.disconnect()
 
-    def request_catchup(self, event):
+    def _request_catchup(self, _event):
         properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
         properties.ResponseTopic = f'replicate/{self.mqtt_options["client_id"]}/catchup'
-        self.mqtt_client.publish('replicate/request', self.lastgood_ts, 0, False, properties=properties)
+        self.mqtt_client.publish('replicate/request',
+                                 self.lastgood_ts,
+                                 0,
+                                 False,
+                                 properties=properties)
 
     def _on_connect(self, userdata):
         userdata['connect'] = True
@@ -368,7 +383,7 @@ class MQTTRequester(weewx.engine.StdService):
         if not self.dbmanager:
             self.dbmanager = weewx.manager.open_manager(self.manager_dict)
 
-    def _on_message(self, userdata, msg):
+    def _on_message(self, _userdata, msg):
         print(f'handle message: {msg}')
         record = json.loads(msg.payload.decode('utf-8'))
         self.dbmanager.addRecord(record)
