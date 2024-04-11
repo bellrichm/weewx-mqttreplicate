@@ -237,7 +237,11 @@ class MQTTClientV2(MQTTClient):
         self._on_log(userdata, level, msg)
 
     def _client_on_message(self, _client, userdata, msg):
-        print(f"topic: {msg.topic}, QOS: {int(msg.qos)}, retain: {msg.retain}, payload: {msg.payload} properties: {msg.properties}")
+        print((f"topic: {msg.topic},"
+               f" QOS: {int(msg.qos)},"
+               f" retain: {msg.retain},"
+               f" payload: {msg.payload},"
+               f" properties: {msg.properties}"))
         self._on_message(userdata, msg)
 
     def _client_on_publish(self, _client, userdata, mid, _reason_codes, _properties):
@@ -281,7 +285,7 @@ class MQTTResponder(weewx.engine.StdService):
         """Run when an engine shutdown is requested."""
         if self._thread:
             self.logger.loginf(f"Client {self.client_id} SHUTDOWN - thread initiated")
-            self._thread.shutDown()
+            self._thread.shut_down()
 
 class MQTTResponderThread(threading.Thread):
     ''' Manage the MQTT communication for the "server" that sends the data. '''
@@ -297,6 +301,8 @@ class MQTTResponderThread(threading.Thread):
         self.mqtt_client.on_message = self._on_message
         self.mqtt_client.connect(self.mqtt_options)
 
+        self.dbmanager = None
+
     def run(self):
         self.logger.logdbg(f"Client {self.client_id} starting MQTT loop")
         with weewx.manager.open_manager(self.manager_dict) as _manager:
@@ -304,7 +310,7 @@ class MQTTResponderThread(threading.Thread):
             self.mqtt_client.client.loop_forever()
         self.logger.logdbg(f"Client {self.client_id} MQTT loop ended.")
 
-    def shutDown(self):
+    def shut_down(self):
         ''' Perform operations to terminate MQTT.'''
         self.logger.loginf(f'Client {self.client_id} shutting down the MQTT client.')
         self.mqtt_client.disconnect()
