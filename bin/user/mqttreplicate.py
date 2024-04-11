@@ -215,31 +215,31 @@ class MQTTClientV2(MQTTClient):
         self.logger.logdbg(f"Client {self.client_id} connected with result code {reason_code}")
         print(f"Connected with result code {int(reason_code.value)}")
         print(f"Connected flags {str(flags)}")
-        self.on_connect(userdata)
+        self._on_connect(userdata)
     
     def _client_on_connect_fail(self, client, userdata):
-        self.on_connect_fail(userdata)
+        self._on_connect_fail(userdata)
 
     def _client_on_disconnect(self, _client, userdata, _flags, reason_code, _properties):
         print("Disconnected with result code %i" % int(reason_code.value))
-        self.on_disconnect(userdata)
+        self._on_disconnect(userdata)
 
     def _client_on_log(self, _client, userdata, level, msg):
         """ The on_log callback. """
         print("MQTT log: %s" %msg)
-        self.on_log(userdata, level, msg)        
+        self._on_log(userdata, level, msg)        
 
     def _client_on_message(self, client, userdata, msg):
         print(f"topic: {msg.topic}, QOS: {int(msg.qos)}, retain: {msg.retain}, payload: {msg.payload} properties: {msg.properties}")
-        self.on_message(userdata, msg)
+        self._on_message(userdata, msg)
 
     def _client_on_publish(self, _client, userdata, mid, reason_codes, properties):
         """ The on_publish callback. """
         print("Published  (%s): %s" % (int(time.time()), mid))
-        self.on_publish(userdata)
+        self._on_publish(userdata)
 
     def _client_on_subscribe(self, client, userdata, mid, reason_code_list, properties):
-        self.on_subscribe(userdata, mid)
+        self._on_subscribe(userdata, mid)
 
 class MQTTResponder(weewx.engine.StdService):
     def __init__(self, engine, config_dict):
