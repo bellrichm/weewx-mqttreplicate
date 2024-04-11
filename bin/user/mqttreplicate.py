@@ -208,36 +208,42 @@ class MQTTClientV2(MQTTClient):
 
     def subscribe(self, topic, qos):
         (result, mid) = self.client.subscribe(topic, qos)
-        print(f"Subscribing to {topic} has a mid {int(mid)} and rc {int(result)}")
+        print((f"Client {self.client_id}"
+               f" subscribing to {topic}"
+               f" has a mid {int(mid)}"
+               f" and rc {int(result)}"))
         #self.client.loop(timeout=0.1)
 
     def publish(self, topic, data, qos, retain, properties=None):
         mqtt_message_info = self.client.publish(topic, data, qos, retain, properties)
-        print(f"Publishing ({int(time.time())}): {mqtt_message_info.mid} {qos} {topic}")
+        print((f"Client {self.client_id}"
+               f"  publishing ({int(time.time())}):"
+               f" {mqtt_message_info.mid} {qos} {topic}"))
         #self.client.loop(timeout=0.1)
 
     # The  wrappers of the callbacks are next
 
     def _client_on_connect(self, _client, userdata, flags, reason_code, _properties):
         self.logger.logdbg(f"Client {self.client_id} connected with result code {reason_code}")
-        print(f"Connected with result code {int(reason_code.value)}")
-        print(f"Connected flags {str(flags)}")
+        print(f"Client {self.client_id} connected with result code {int(reason_code.value)}")
+        print(f"Client {self.client_id} connected flags {str(flags)}")
         self._on_connect(userdata)
 
     def _client_on_connect_fail(self, _client, userdata):
         self._on_connect_fail(userdata)
 
     def _client_on_disconnect(self, _client, userdata, _flags, reason_code, _properties):
-        print(f"Disconnected with result code {reason_code.value}")
+        print(f"Client {self.client_id} disconnected with result code {reason_code.value}")
         self._on_disconnect(userdata)
 
     def _client_on_log(self, _client, userdata, level, msg):
         """ The on_log callback. """
-        print(f"MQTT log: {msg}")
+        print(f"Client {self.client_id} MQTT log: {msg}")
         self._on_log(userdata, level, msg)
 
     def _client_on_message(self, _client, userdata, msg):
-        print((f"topic: {msg.topic},"
+        print((f"Client {self.client_id}:"
+               f" topic: {msg.topic},"
                f" QOS: {int(msg.qos)},"
                f" retain: {msg.retain},"
                f" payload: {msg.payload},"
@@ -246,7 +252,7 @@ class MQTTClientV2(MQTTClient):
 
     def _client_on_publish(self, _client, userdata, mid, _reason_codes, _properties):
         """ The on_publish callback. """
-        print(f"Published  ({int(time.time())}): {mid}")
+        print(f"Client {self.client_id} published  ({int(time.time())}): {mid}")
         self._on_publish(userdata)
 
     def _client_on_subscribe(self, _client, userdata, mid, _reason_code_list, _properties):
@@ -323,7 +329,8 @@ class MQTTResponderThread(threading.Thread):
         response_topic = msg.properties.ResponseTopic
         self.logger.logdbg(f'Client {self.client_id} received msg: {msg}')
         start_timestamp = int(msg.payload.decode('utf-8'))
-        self.logger.logdbg('Responding on response topic:', response_topic)
+        self.logger.logdbg((f'Client {self.client_id}'
+                            f' responding on response topic: {response_topic}'))
         for record in self.dbmanager.genBatchRecords(start_timestamp):
             payload = json.dumps(record)
             self.logger.logdbg(f'Client {self.client_id} response is: {payload}.')
@@ -360,6 +367,7 @@ class MQTTRequester(weewx.engine.StdService):
         self.mqtt_client.on_message = self._on_message
         self.mqtt_client.connect(self.mqtt_options)
         self.mqtt_client.connect(self.mqtt_options)
+        self.client_id = self.mqtt_options['client_id']
         # needed to get on_message called, probably getting disconnected?
         self.mqtt_client.loop_start()
 
@@ -390,7 +398,7 @@ class MQTTRequester(weewx.engine.StdService):
             self.dbmanager = weewx.manager.open_manager(self.manager_dict)
 
     def _on_message(self, _userdata, msg):
-        print(f'handle message: {msg}')
+        print(f'Client {self.client_id} handle message: {msg}')
         record = json.loads(msg.payload.decode('utf-8'))
         self.dbmanager.addRecord(record)
 
