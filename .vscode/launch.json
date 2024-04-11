@@ -11,6 +11,16 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "justMyCode": false
-        }
+        },
+        {
+            "name": "weewxd: Full install",
+            "type": "debugpy",
+            "request": "launch",  
+            "program": "~/weewx/src/weewxd.py",
+            "args": [
+                "--config", "~/weewx-data/weewx.conf"
+            ],            
+            "console": "integratedTerminal"
+        },              
     ]
 }
