@@ -242,12 +242,6 @@ class MQTTClientV2(MQTTClient):
         self._on_log(userdata, level, msg)
 
     def _client_on_message(self, _client, userdata, msg):
-        print((f"Client {self.client_id}:"
-               f" topic: {msg.topic},"
-               f" QOS: {int(msg.qos)},"
-               f" retain: {msg.retain},"
-               f" payload: {msg.payload},"
-               f" properties: {msg.properties}"))
         self._on_message(userdata, msg)
 
     def _client_on_publish(self, _client, userdata, mid, _reason_codes, _properties):
@@ -326,6 +320,12 @@ class MQTTResponderThread(threading.Thread):
         self.mqtt_client.subscribe('replicate/request', 0)
 
     def _on_message(self, _userdata, msg):
+        self.logger.logdbg((f"Client {self.client_id}:"
+                            f" topic: {msg.topic},"
+                            f" QOS: {int(msg.qos)},"
+                            f" retain: {msg.retain},"
+                            f" payload: {msg.payload},"
+                            f" properties: {msg.properties}"))            
         response_topic = msg.properties.ResponseTopic
         self.logger.logdbg(f'Client {self.client_id} received msg: {msg}')
         start_timestamp = int(msg.payload.decode('utf-8'))
@@ -347,7 +347,7 @@ class MQTTRequester(weewx.engine.StdService):
 
         enable = to_bool(service_dict.get('enable', True))
         if not enable:
-            print("Not enabled, exiting.")
+            self.logger.loginf("Not enabled, exiting.")
             return
 
         _data_binding = service_dict.get('data_binding', 'wx_binding')
@@ -398,7 +398,12 @@ class MQTTRequester(weewx.engine.StdService):
             self.dbmanager = weewx.manager.open_manager(self.manager_dict)
 
     def _on_message(self, _userdata, msg):
-        print(f'Client {self.client_id} handle message: {msg}')
+        self.logger.logdbg((f"Client {self.client_id}:"
+                            f" topic: {msg.topic},"
+                            f" QOS: {int(msg.qos)},"
+                            f" retain: {msg.retain},"
+                            f" payload: {msg.payload},"
+                            f" properties: {msg.properties}"))        
         record = json.loads(msg.payload.decode('utf-8'))
         self.dbmanager.addRecord(record)
 
