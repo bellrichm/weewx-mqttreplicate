@@ -404,9 +404,9 @@ class MQTTRequester(weewx.engine.StdService):
     def _request_catchup(self, _event):
         properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
         properties.ResponseTopic = f'replicate/{self.client_id}/catchup'
-        properties.UserProperty = {
-            'data_binding': 'wx_binding'
-        }
+        properties.UserProperty = [
+            ('data_binding', 'wx_binding')
+            ]
 
         qos = 0
         topic = 'replicate/request'
@@ -422,7 +422,7 @@ class MQTTRequester(weewx.engine.StdService):
     def _on_connect(self, _userdata):
         topic = f'replicate/{self.client_id}/catchup'
         (result, mid) = self.mqtt_client.subscribe(topic, 0)
-        self.logger.log((f"Client {self.client_id}"
+        self.logger.logdbg((f"Client {self.client_id}"
                          f" subscribing to {topic}"
                          f" has a mid {int(mid)}"
                          f" and rc {int(result)}"))
