@@ -222,7 +222,7 @@ class MQTTClientV2(MQTTClient):
     def _client_on_disconnect(self, _client, userdata, _flags, reason_code, _properties):
         self.logger.logdbg((f"Client {self.client_id}"
                             f" disconnected with result code {reason_code.value}"))
-        self._on_disconnect(userdata)
+        self._on_disconnect(userdata, reason_code.value)
 
     def _client_on_log(self, _client, userdata, level, msg):
         """ The on_log callback. """
@@ -261,7 +261,6 @@ class MQTTResponder(weewx.engine.StdService):
         if self._thread:
             self.logger.loginf(f"Client {self.client_id} SHUTDOWN - thread initiated")
             self._thread.shut_down()
-            print("done")
 
 class MQTTResponderThread(threading.Thread):
     ''' Manage the MQTT communication for the "server" that sends the data. '''
@@ -290,6 +289,7 @@ class MQTTResponderThread(threading.Thread):
         self.mqtt_client = MQTTClient.get_client(self.logger, self.client_id, None)
 
         self.mqtt_client.on_connect = self._on_connect
+        self.mqtt_client.on_disconnect = self._on_disconnect
         if service_dict.get('log_mqtt', False):
             self.mqtt_client.on_log = self._on_log
         self.mqtt_client.on_message = self._on_message
@@ -309,9 +309,6 @@ class MQTTResponderThread(threading.Thread):
     def shut_down(self):
         ''' Perform operations to terminate MQTT.'''
         self.logger.loginf(f'Client {self.client_id} shutting down the MQTT client.')
-        for data_binding_name, data_binding in self.data_bindings.items():
-            data_binding['dbmanager'].close()
-            self.logger.logdbg(f"Client {self.client_id} closed {data_binding_name}.")
         self.mqtt_client.disconnect()
 
     def _on_connect(self, _userdata):
@@ -320,6 +317,12 @@ class MQTTResponderThread(threading.Thread):
                     f" subscribing to {self.topic}"
                     f" has a mid {int(mid)}"
                     f" and rc {int(result)}"))
+
+    def _on_disconnect(self, _userdata, rc):
+        if rc == 0:
+            for data_binding_name, data_binding in self.data_bindings.items():
+                data_binding['dbmanager'].close()
+                self.logger.logdbg(f"Client {self.client_id} closed {data_binding_name}.")
 
     def _on_log(self, _client, _userdata, level, msg):
         self.mqtt_logger[level](f"Client {self.client_id} MQTT log: {msg}")
