@@ -44,7 +44,7 @@ class MQTTClient(abc.ABC):
 
         raise ValueError("paho mqtt v2 is required.")
 
-    def connect(self, mqtt_options):
+    def connect(self, host, port, keepalive):
         ''' Connect to the MQTT server. '''
         raise NotImplementedError("Method 'connect' is not implemented")
 
@@ -186,8 +186,8 @@ class MQTTClientV2(MQTTClient):
 
     # The wrappers of the  client methods are next
 
-    def connect(self, mqtt_options):
-        self.client.connect(mqtt_options['host'], mqtt_options['port'], mqtt_options['keepalive'])
+    def connect(self, host, port, keepalive):
+        self.client.connect(host, port, keepalive)
 
     def disconnect(self):
         self.client.disconnect()
@@ -254,17 +254,9 @@ class MQTTResponder(weewx.engine.StdService):
 
         _data_binding = service_dict.get('data_binding', 'wx_binding')
         _manager_dict = weewx.manager.get_manager_dict_from_config(config_dict, _data_binding)
+        self.client_id = 'MQTTReplicateRespond-' + str(random.randint(1000, 9999))
 
-        self.mqtt_options = {}
-        self.mqtt_options['log_mqtt'] = False
-        self.mqtt_options['host'] = 'rmbell-v01.local'
-        self.mqtt_options['port'] = 1883
-        self.mqtt_options['keepalive'] = 60
-        self.mqtt_options['client_id'] = 'MQTTReplicateRespond-' + str(random.randint(1000, 9999))
-        self.mqtt_options['clean_start'] = False
-        self.client_id = self.mqtt_options['client_id']
-
-        self._thread = MQTTResponderThread(self.logger, _manager_dict, self.mqtt_options)
+        self._thread = MQTTResponderThread(self.logger, self.client_id, _manager_dict, service_dict)
         self._thread.start()
 
     def shutDown(self):
@@ -275,12 +267,11 @@ class MQTTResponder(weewx.engine.StdService):
 
 class MQTTResponderThread(threading.Thread):
     ''' Manage the MQTT communication for the "server" that sends the data. '''
-    def __init__(self, logger, manager_dict, mqtt_options):
+    def __init__(self, logger, client_id, manager_dict, service_dict):
         threading.Thread.__init__(self)
         self.logger = logger
-        self.client_id = mqtt_options['client_id']
+        self.client_id = client_id
         self.manager_dict = manager_dict
-        self.mqtt_options = mqtt_options
 
         self.mqtt_logger = {
             paho.mqtt.client.MQTT_LOG_INFO: self.logger.loginf,
@@ -291,11 +282,15 @@ class MQTTResponderThread(threading.Thread):
         }
 
         self.mqtt_client = MQTTClient.get_client(self.logger, self.client_id, None)
+
         self.mqtt_client.on_connect = self._on_connect
-        if self.mqtt_options['log_mqtt']:
+        if service_dict.get('log_mqtt', False):
             self.mqtt_client.on_log = self._on_log
         self.mqtt_client.on_message = self._on_message
-        self.mqtt_client.connect(self.mqtt_options)
+
+        self.mqtt_client.connect(service_dict.get('host', 'rmbell-v01.local'),
+                                 service_dict.get('port', 1883),
+                                 service_dict.get('keepalive', 60))
 
         self.dbmanager = None
 
@@ -349,31 +344,36 @@ class MQTTRequester(weewx.engine.StdService):
         super().__init__(engine, config_dict)
         self.logger = Logger()
         service_dict = config_dict.get('MQTTReplicate', {}).get('Requester', {})
-        self.manager_dict = weewx.manager.get_manager_dict_from_config(config_dict, 'wx_binding')
-        self.dbmanager = None
 
         enable = to_bool(service_dict.get('enable', True))
         if not enable:
             self.logger.loginf("Requester not enabled, exiting.")
             return
 
+        self.manager_dict = weewx.manager.get_manager_dict_from_config(config_dict, 'wx_binding')
         _data_binding = service_dict.get('data_binding', 'wx_binding')
+        self.client_id = 'MQTTReplicateRequest-' + str(random.randint(1000, 9999))
+        self.dbmanager = None
 
-        self.mqtt_options = {}
-        self.mqtt_options['log_mqtt'] = False
-        self.mqtt_options['host'] = 'rmbell-v01.local'
-        self.mqtt_options['port'] = 1883
-        self.mqtt_options['keepalive'] = 60
-        self.mqtt_options['client_id'] = 'MQTTReplicateRequest-' + str(random.randint(1000, 9999))
-        self.mqtt_options['clean_start'] = False
+        self.mqtt_logger = {
+            paho.mqtt.client.MQTT_LOG_INFO: self.logger.loginf,
+            paho.mqtt.client.MQTT_LOG_NOTICE: self.logger.loginf,
+            paho.mqtt.client.MQTT_LOG_WARNING: self.logger.loginf,
+            paho.mqtt.client.MQTT_LOG_ERR: self.logger.loginf,
+            paho.mqtt.client.MQTT_LOG_DEBUG: self.logger.loginf
+        }
 
-        self.mqtt_client = MQTTClient.get_client(self.logger, self.mqtt_options['client_id'], None)
+        self.mqtt_client = MQTTClient.get_client(self.logger, self.client_id, None)
+
         self.mqtt_client.on_connect = self._on_connect
+        if service_dict.get('log_mqtt', False):
+            self.mqtt_client.on_log = self._on_log
         self.mqtt_client.on_message = self._on_message
-        self.mqtt_client.connect(self.mqtt_options)
-        self.mqtt_client.connect(self.mqtt_options)
-        self.client_id = self.mqtt_options['client_id']
-        # needed to get on_message called, probably getting disconnected?
+
+        self.mqtt_client.connect(service_dict.get('host', 'rmbell-v01.local'),
+                                 service_dict.get('port', 1883),
+                                 service_dict.get('keepalive', 60))
+
         self.mqtt_client.loop_start()
 
         self.dbmanager = engine.db_binder.get_manager(_data_binding)
@@ -388,7 +388,7 @@ class MQTTRequester(weewx.engine.StdService):
 
     def _request_catchup(self, _event):
         properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
-        properties.ResponseTopic = f'replicate/{self.mqtt_options["client_id"]}/catchup'
+        properties.ResponseTopic = f'replicate/{self.client_id}/catchup'
         qos = 0
         topic = 'replicate/request'
         mqtt_message_info = self.mqtt_client.publish(topic,
@@ -401,7 +401,7 @@ class MQTTRequester(weewx.engine.StdService):
                     f" {mqtt_message_info.mid} {qos} {topic}"))
 
     def _on_connect(self, _userdata):
-        topic = f'replicate/{self.mqtt_options["client_id"]}/catchup'
+        topic = f'replicate/{self.client_id}/catchup'
         (result, mid) = self.mqtt_client.subscribe(topic, 0)
         self.logger.log((f"Client {self.client_id}"
                          f" subscribing to {topic}"
@@ -410,6 +410,9 @@ class MQTTRequester(weewx.engine.StdService):
         # dbmanager needs to be created in same thread as on_message called
         if not self.dbmanager:
             self.dbmanager = weewx.manager.open_manager(self.manager_dict)
+
+    def _on_log(self, _client, _userdata, level, msg):
+        self.mqtt_logger[level](f"Client {self.client_id} MQTT log: {msg}")
 
     def _on_message(self, _userdata, msg):
         self.logger.logdbg((f"Client {self.client_id}:"
