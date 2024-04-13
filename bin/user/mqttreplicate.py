@@ -244,17 +244,16 @@ class MQTTResponder(weewx.engine.StdService):
     def __init__(self, engine, config_dict):
         super().__init__(engine, config_dict)
         self.logger = Logger()
-        service_dict = config_dict.get('MQTTReplicate', {}).get('Responder', {})
 
-        if not to_bool(service_dict.get('enable', True)):
+        if not to_bool(config_dict.get('MQTTReplicate', {})\
+                       .get('Responder', {})\
+                        .get('enable', True)):
             self.logger.loginf("Responder not enabled, exiting.")
             return
 
-        _data_binding = service_dict.get('data_binding', 'wx_binding')
-        _manager_dict = weewx.manager.get_manager_dict_from_config(config_dict, _data_binding)
         self.client_id = 'MQTTReplicateRespond-' + str(random.randint(1000, 9999))
 
-        self._thread = MQTTResponderThread(self.logger, self.client_id, _manager_dict, service_dict)
+        self._thread = MQTTResponderThread(self.logger, self.client_id, config_dict)
         self._thread.start()
 
     def shutDown(self):
@@ -265,11 +264,17 @@ class MQTTResponder(weewx.engine.StdService):
 
 class MQTTResponderThread(threading.Thread):
     ''' Manage the MQTT communication for the "server" that sends the data. '''
-    def __init__(self, logger, client_id, manager_dict, service_dict):
+    def __init__(self, logger, client_id, config_dict):
         threading.Thread.__init__(self)
+        service_dict = config_dict.get('MQTTReplicate', {}).get('Responder', {})
         self.logger = logger
         self.client_id = client_id
-        self.manager_dict = manager_dict
+
+        self.data_bindings = {}
+        _data_binding = service_dict.get('data_binding', 'wx_binding')
+        self.data_bindings[_data_binding] = {}
+        self.data_bindings[_data_binding]['manager_dict'] = \
+            weewx.manager.get_manager_dict_from_config(config_dict, _data_binding)
 
         self.mqtt_logger = {
             paho.mqtt.client.MQTT_LOG_INFO: self.logger.loginf,
@@ -291,18 +296,20 @@ class MQTTResponderThread(threading.Thread):
                                  service_dict.get('port', 1883),
                                  service_dict.get('keepalive', 60))
 
-        self.dbmanager = None
-
     def run(self):
         self.logger.logdbg(f"Client {self.client_id} starting MQTT loop")
-        with weewx.manager.open_manager(self.manager_dict) as _manager:
-            self.dbmanager = _manager
-            self.mqtt_client.client.loop_forever()
+        # Need to get the database manager in the thread that is used
+        for _, data_binding in self.data_bindings.items():
+            data_binding['dbmanager'] = weewx.manager.open_manager(data_binding['manager_dict'])
+        self.mqtt_client.client.loop_forever()
         self.logger.logdbg(f"Client {self.client_id} MQTT loop ended.")
 
     def shut_down(self):
         ''' Perform operations to terminate MQTT.'''
         self.logger.loginf(f'Client {self.client_id} shutting down the MQTT client.')
+        for data_binding_name, data_binding in self.data_bindings.items():
+            data_binding['dbmanager'].close()
+            self.logger.logdbg(f"Client {self.client_id} closed {data_binding_name}.")
         self.mqtt_client.disconnect()
 
     def _on_connect(self, _userdata):
@@ -342,6 +349,12 @@ class MQTTResponderThread(threading.Thread):
                                f' skipping topic: {msg.topic} payload: {msg.payload}')
             return
 
+        if data_binding not in self.data_bindings:
+            self.logger.logerr(f'Client {self.client_id} has unknown data_binding {data_binding}')
+            self.logger.logerr(f'Client {self.client_id}'
+                               f' skipping topic: {msg.topic} payload: {msg.payload}')
+            return
+
         response_topic = msg.properties.ResponseTopic
         start_timestamp = int(msg.payload.decode('utf-8'))
 
@@ -349,7 +362,8 @@ class MQTTResponderThread(threading.Thread):
         self.logger.logdbg((f'Client {self.client_id}'
                             f' responding on response topic: {response_topic}'))
 
-        for record in self.dbmanager.genBatchRecords(start_timestamp):
+        for record in self.data_bindings[data_binding]['dbmanager']\
+                                        .genBatchRecords(start_timestamp):
             payload = json.dumps(record)
             qos = 0
             self.logger.logdbg(f'Client {self.client_id} response is: {payload}.')
