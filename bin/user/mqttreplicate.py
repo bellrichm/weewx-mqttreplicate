@@ -330,13 +330,18 @@ class MQTTResponderThread(threading.Thread):
             return
 
         user_property = msg.properties.UserProperty
-        if 'data_binding' not in user_property:
+        data_binding = None
+        for keyword_value in user_property:
+            if keyword_value[0] == 'data_binding':
+                data_binding = keyword_value[1]
+                break
+
+        if not data_binding:
             self.logger.logerr(f'Client {self.client_id} has no "data_binding" UserProperty')
             self.logger.logerr(f'Client {self.client_id}'
                                f' skipping topic: {msg.topic} payload: {msg.payload}')
             return
 
-        data_binding = user_property['data_binding']
         response_topic = msg.properties.ResponseTopic
         start_timestamp = int(msg.payload.decode('utf-8'))
 
