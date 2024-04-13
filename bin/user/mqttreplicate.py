@@ -289,7 +289,6 @@ class MQTTResponderThread(threading.Thread):
         self.mqtt_client = MQTTClient.get_client(self.logger, self.client_id, None)
 
         self.mqtt_client.on_connect = self._on_connect
-        self.mqtt_client.on_disconnect = self._on_disconnect
         if service_dict.get('log_mqtt', False):
             self.mqtt_client.on_log = self._on_log
         self.mqtt_client.on_message = self._on_message
@@ -303,7 +302,11 @@ class MQTTResponderThread(threading.Thread):
         # Need to get the database manager in the thread that is used
         for _, data_binding in self.data_bindings.items():
             data_binding['dbmanager'] = weewx.manager.open_manager(data_binding['manager_dict'])
+
         self.mqtt_client.client.loop_forever()
+
+        for _, data_binding in self.data_bindings.items():
+            data_binding['dbmanager'].close()
         self.logger.logdbg(f"Client {self.client_id} MQTT loop ended.")
 
     def shut_down(self):
@@ -317,12 +320,6 @@ class MQTTResponderThread(threading.Thread):
                     f" subscribing to {self.topic}"
                     f" has a mid {int(mid)}"
                     f" and rc {int(result)}"))
-
-    def _on_disconnect(self, _userdata, rc):
-        if rc == 0:
-            for data_binding_name, data_binding in self.data_bindings.items():
-                data_binding['dbmanager'].close()
-                self.logger.logdbg(f"Client {self.client_id} closed {data_binding_name}.")
 
     def _on_log(self, _client, _userdata, level, msg):
         self.mqtt_logger[level](f"Client {self.client_id} MQTT log: {msg}")
