@@ -322,11 +322,28 @@ class MQTTResponderThread(threading.Thread):
                             f" retain: {msg.retain},"
                             f" payload: {msg.payload},"
                             f" properties: {msg.properties}"))            
+
+        if not hasattr(msg.properties,'UserProperty'):
+            self.logger.logerr(f'Client {self.client_id} has no "UserProperty"')
+            self.logger.logerr(f'Client {self.client_id}'
+                               f' skipping topic: {msg.topic} payload: {msg.payload}')
+            return
+
+        user_property = msg.properties.UserProperty
+        if 'data_binding' not in user_property:
+            self.logger.logerr(f'Client {self.client_id} has no "data_binding" UserProperty')
+            self.logger.logerr(f'Client {self.client_id}'
+                               f' skipping topic: {msg.topic} payload: {msg.payload}')
+            return
+
+        data_binding = user_property['data_binding']
         response_topic = msg.properties.ResponseTopic
-        self.logger.logdbg(f'Client {self.client_id} received msg: {msg}')
         start_timestamp = int(msg.payload.decode('utf-8'))
+
+        self.logger.logdbg(f'Client {self.client_id} received msg: {msg}')
         self.logger.logdbg((f'Client {self.client_id}'
                             f' responding on response topic: {response_topic}'))
+
         for record in self.dbmanager.genBatchRecords(start_timestamp):
             payload = json.dumps(record)
             qos = 0
@@ -387,6 +404,10 @@ class MQTTRequester(weewx.engine.StdService):
     def _request_catchup(self, _event):
         properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
         properties.ResponseTopic = f'replicate/{self.client_id}/catchup'
+        properties.UserProperty = {
+            'data_binding': 'wx_binding'
+        }
+
         qos = 0
         topic = 'replicate/request'
         mqtt_message_info = self.mqtt_client.publish(topic,
