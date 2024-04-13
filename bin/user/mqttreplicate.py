@@ -226,7 +226,6 @@ class MQTTClientV2(MQTTClient):
 
     def _client_on_log(self, _client, userdata, level, msg):
         """ The on_log callback. """
-        #self.logger.logdbg(f"Client {self.client_id} MQTT log: {msg}")
         self._on_log(userdata, level, msg)
 
     def _client_on_message(self, _client, userdata, msg):
@@ -247,8 +246,7 @@ class MQTTResponder(weewx.engine.StdService):
         self.logger = Logger()
         service_dict = config_dict.get('MQTTReplicate', {}).get('Responder', {})
 
-        enable = to_bool(service_dict.get('enable', True))
-        if not enable:
+        if not to_bool(service_dict.get('enable', True)):
             self.logger.loginf("Responder not enabled, exiting.")
             return
 
@@ -281,6 +279,7 @@ class MQTTResponderThread(threading.Thread):
             paho.mqtt.client.MQTT_LOG_DEBUG: self.logger.loginf
         }
 
+        self.topic = 'replicate/request'
         self.mqtt_client = MQTTClient.get_client(self.logger, self.client_id, None)
 
         self.mqtt_client.on_connect = self._on_connect
@@ -307,10 +306,9 @@ class MQTTResponderThread(threading.Thread):
         self.mqtt_client.disconnect()
 
     def _on_connect(self, _userdata):
-        topic = 'replicate/request'
-        (result, mid) = self.mqtt_client.subscribe(topic, 0)
+        (result, mid) = self.mqtt_client.subscribe(self.topic, 0)
         self.logger.logdbg((f"Client {self.client_id}"
-                    f" subscribing to {topic}"
+                    f" subscribing to {self.topic}"
                     f" has a mid {int(mid)}"
                     f" and rc {int(result)}"))
 
