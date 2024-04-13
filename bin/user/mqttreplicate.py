@@ -261,6 +261,7 @@ class MQTTResponder(weewx.engine.StdService):
         if self._thread:
             self.logger.loginf(f"Client {self.client_id} SHUTDOWN - thread initiated")
             self._thread.shut_down()
+            print("done")
 
 class MQTTResponderThread(threading.Thread):
     ''' Manage the MQTT communication for the "server" that sends the data. '''
@@ -271,10 +272,11 @@ class MQTTResponderThread(threading.Thread):
         self.client_id = client_id
 
         self.data_bindings = {}
-        _data_binding = service_dict.get('data_binding', 'wx_binding')
-        self.data_bindings[_data_binding] = {}
-        self.data_bindings[_data_binding]['manager_dict'] = \
-            weewx.manager.get_manager_dict_from_config(config_dict, _data_binding)
+        for database_name in service_dict['databases']:
+            _data_binding = service_dict['databases'][database_name]['data_binding']
+            self.data_bindings[_data_binding] = {}
+            self.data_bindings[_data_binding]['manager_dict'] = \
+                weewx.manager.get_manager_dict_from_config(config_dict, _data_binding)
 
         self.mqtt_logger = {
             paho.mqtt.client.MQTT_LOG_INFO: self.logger.loginf,
