@@ -358,6 +358,12 @@ class MQTTResponderThread(threading.Thread):
             return
 
         response_topic = msg.properties.ResponseTopic
+
+        properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
+        properties.UserProperty = [
+            ('data_binding', data_binding)
+            ]
+
         start_timestamp = int(msg.payload.decode('utf-8'))
 
         self.logger.logdbg(f'Client {self.client_id} received msg: {msg}')
@@ -369,7 +375,11 @@ class MQTTResponderThread(threading.Thread):
             payload = json.dumps(record)
             qos = 0
             self.logger.logdbg(f'Client {self.client_id} response is: {payload}.')
-            mqtt_message_info = self.mqtt_client.publish(response_topic, payload, 0, False)
+            mqtt_message_info = self.mqtt_client.publish(response_topic,
+                                                        payload,
+                                                        0,
+                                                        False,
+                                                        properties=properties)
             self.logger.logdbg((f"Client {self.client_id}"
                                 f"  publishing ({int(time.time())}):"
                                 f" {mqtt_message_info.mid} {qos} {response_topic}"))
