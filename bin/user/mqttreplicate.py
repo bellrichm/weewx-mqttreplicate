@@ -397,9 +397,21 @@ class MQTTRequester(weewx.engine.StdService):
             return
 
         self.manager_dict = weewx.manager.get_manager_dict_from_config(config_dict, 'wx_binding')
-        _data_binding = service_dict.get('data_binding', 'wx_binding')
         self.client_id = 'MQTTReplicateRequest-' + str(random.randint(1000, 9999))
-        self.dbmanager = None
+
+        self.data_bindings = {}
+        for database_name in service_dict['databases']:
+            _primary_data_binding = service_dict['databases'][database_name]['primary_data_binding']
+            _secondary_data_binding = \
+                service_dict['databases'][database_name]['secondary_data_binding']
+            self.data_bindings[_primary_data_binding] = {}
+            self.data_bindings[_primary_data_binding]['manager_dict'] = \
+                weewx.manager.get_manager_dict_from_config(config_dict, _secondary_data_binding)
+            self.data_bindings[_primary_data_binding]['dbmanager'] = None
+            dbmanager = engine.db_binder.get_manager(_secondary_data_binding)
+            # Find out when the database was last updated.
+            self.data_bindings[_primary_data_binding]['last_good_timestamp'] = dbmanager.lastGoodStamp()
+
 
         self.mqtt_logger = {
             paho.mqtt.client.MQTT_LOG_INFO: self.logger.loginf,
@@ -423,9 +435,6 @@ class MQTTRequester(weewx.engine.StdService):
 
         self.mqtt_client.loop_start()
 
-        dbmanager = engine.db_binder.get_manager(_data_binding)
-        # Find out when the database was last updated.
-        self.lastgood_ts = dbmanager.lastGoodStamp()
         self.bind(weewx.STARTUP, self._request_catchup)
 
     def shutDown(self):
@@ -434,22 +443,24 @@ class MQTTRequester(weewx.engine.StdService):
         self.mqtt_client.loop_stop()
 
     def _request_catchup(self, _event):
-        properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
-        properties.ResponseTopic = f'replicate/{self.client_id}/catchup'
-        properties.UserProperty = [
-            ('data_binding', 'wx_binding')
-            ]
-
         qos = 0
         topic = 'replicate/request'
-        mqtt_message_info = self.mqtt_client.publish(topic,
-                                                     self.lastgood_ts,
-                                                     qos,
-                                                     False,
-                                                     properties=properties)
-        self.logger.logdbg((f"Client {self.client_id}"
-                    f"  publishing ({int(time.time())}):"
-                    f" {mqtt_message_info.mid} {qos} {topic}"))
+
+        for data_binding_name, data_binding in self.data_bindings.items():
+            properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
+            properties.ResponseTopic = f'replicate/{self.client_id}/catchup'
+            properties.UserProperty = [
+                ('data_binding', data_binding_name)
+                ]
+
+            mqtt_message_info = self.mqtt_client.publish(topic,
+                                                        data_binding['last_good_timestamp'],
+                                                        qos,
+                                                        False,
+                                                        properties=properties)
+            self.logger.logdbg((f"Client {self.client_id}"
+                        f"  publishing ({int(time.time())}):"
+                        f" {mqtt_message_info.mid} {qos} {topic}"))
 
     def _on_connect(self, _userdata):
         topic = f'replicate/{self.client_id}/catchup'
@@ -459,13 +470,15 @@ class MQTTRequester(weewx.engine.StdService):
                          f" has a mid {int(mid)}"
                          f" and rc {int(result)}"))
         # dbmanager needs to be created in same thread as on_message called
-        if not self.dbmanager:
-            self.dbmanager = weewx.manager.open_manager(self.manager_dict)
+        for _, data_binding in self.data_bindings.items():
+            if not data_binding['dbmanager']:
+                data_binding['dbmanager'] = weewx.manager.open_manager(data_binding['manager_dict'])
 
     def _on_disconnect(self, _userdata, rc):
         if rc == 0:
-            self.dbmanager.close()
-            self.logger.logdbg(f"Client {self.client_id} closed db.")
+            for data_binding_name, data_binding in self.data_bindings.items():
+                data_binding['dbmanager'].close()
+                self.logger.logdbg(f"Client {self.client_id} closed db {data_binding_name}.")
 
     def _on_log(self, _client, _userdata, level, msg):
         self.mqtt_logger[level](f"Client {self.client_id} MQTT log: {msg}")
@@ -476,9 +489,35 @@ class MQTTRequester(weewx.engine.StdService):
                             f" QOS: {int(msg.qos)},"
                             f" retain: {msg.retain},"
                             f" payload: {msg.payload},"
-                            f" properties: {msg.properties}"))        
+                            f" properties: {msg.properties}"))
+
+        if not hasattr(msg.properties,'UserProperty'):
+            self.logger.logerr(f'Client {self.client_id} has no "UserProperty"')
+            self.logger.logerr(f'Client {self.client_id}'
+                               f' skipping topic: {msg.topic} payload: {msg.payload}')
+            return
+
+        user_property = msg.properties.UserProperty
+        data_binding = None
+        for keyword_value in user_property:
+            if keyword_value[0] == 'data_binding':
+                data_binding = keyword_value[1]
+                break
+
+        if not data_binding:
+            self.logger.logerr(f'Client {self.client_id} has no "data_binding" UserProperty')
+            self.logger.logerr(f'Client {self.client_id}'
+                               f' skipping topic: {msg.topic} payload: {msg.payload}')
+            return
+
+        if data_binding not in self.data_bindings:
+            self.logger.logerr(f'Client {self.client_id} has unknown data_binding {data_binding}')
+            self.logger.logerr(f'Client {self.client_id}'
+                               f' skipping topic: {msg.topic} payload: {msg.payload}')
+            return
+
         record = json.loads(msg.payload.decode('utf-8'))
-        self.dbmanager.addRecord(record)
+        self.data_bindings[data_binding]['dbmanager'].addRecord(record)
 
 if __name__ == '__main__':
     print('start')
