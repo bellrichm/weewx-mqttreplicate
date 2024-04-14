@@ -402,6 +402,7 @@ class MQTTRequester(weewx.engine.StdService):
         self.mqtt_client = MQTTClient.get_client(self.logger, self.client_id, None)
 
         self.mqtt_client.on_connect = self._on_connect
+        self.mqtt_client.on_disconnect = self._on_disconnect
         if service_dict.get('log_mqtt', False):
             self.mqtt_client.on_log = self._on_log
         self.mqtt_client.on_message = self._on_message
@@ -412,15 +413,15 @@ class MQTTRequester(weewx.engine.StdService):
 
         self.mqtt_client.loop_start()
 
-        self.dbmanager = engine.db_binder.get_manager(_data_binding)
+        dbmanager = engine.db_binder.get_manager(_data_binding)
         # Find out when the database was last updated.
-        self.lastgood_ts = self.dbmanager.lastGoodStamp()
+        self.lastgood_ts = dbmanager.lastGoodStamp()
         self.bind(weewx.STARTUP, self._request_catchup)
 
     def shutDown(self):
         """Run when an engine shutdown is requested."""
-        self.mqtt_client.loop_stop()
         self.mqtt_client.disconnect()
+        self.mqtt_client.loop_stop()
 
     def _request_catchup(self, _event):
         properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
@@ -450,6 +451,11 @@ class MQTTRequester(weewx.engine.StdService):
         # dbmanager needs to be created in same thread as on_message called
         if not self.dbmanager:
             self.dbmanager = weewx.manager.open_manager(self.manager_dict)
+
+    def _on_disconnect(self, _userdata, rc):
+        if rc == 0:
+            self.dbmanager.close()
+            self.logger.logdbg(f"Client {self.client_id} closed db.")
 
     def _on_log(self, _client, _userdata, level, msg):
         self.mqtt_logger[level](f"Client {self.client_id} MQTT log: {msg}")
