@@ -544,7 +544,6 @@ if __name__ == '__main__':
                             help="The WeeWX configuration file. Typically weewx.conf.")
         subparser.add_argument('--timestamp',
                                type=int,
-                               required=True,
                                help='The timestamp to replicate from.')
         subparser.add_argument('--host',
                                default='localhost',
@@ -597,8 +596,9 @@ if __name__ == '__main__':
             replicator_config_dict['MQTTReplicate']['Requester']['host'] = options.host
             replicator_config_dict['MQTTReplicate']['Requester']['databases'] = {}
             replicator_config_dict['MQTTReplicate']['Requester']['databases']['weewx'] = {}
-            replicator_config_dict['MQTTReplicate']['Requester']['databases']['weewx']\
-                ['timestamp'] = options.timestamp
+            if options.timestamp:
+                replicator_config_dict['MQTTReplicate']['Requester']['databases']['weewx']\
+                    ['timestamp'] = options.timestamp
             replicator_config_dict['MQTTReplicate']['Requester']['databases']['weewx']\
                 ['primary_data_binding'] = options.primary_binding
             replicator_config_dict['MQTTReplicate']['Requester']['databases']['weewx']\
