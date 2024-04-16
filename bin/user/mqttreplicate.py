@@ -610,7 +610,11 @@ if __name__ == '__main__':
             engine = weewx.engine.DummyEngine(config_dict)
             mqtt_requester = MQTTRequester(engine, config_dict)
             mqtt_requester.request_catchup(None)
-            mqtt_requester.shutDown()
+            try:
+                while True:
+                    time.sleep(2)
+            except KeyboardInterrupt:
+                mqtt_requester.shutDown()
         elif options.command == 'respond':
             config_dict.merge(configobj.ConfigObj(replicator_config_dict))
             if 'enable' in config_dict['MQTTReplicate']['Responder']:
