@@ -13,6 +13,7 @@ import paho
 import paho.mqtt
 import paho.mqtt.client
 
+import weecfg
 import weeutil
 import weeutil.logger
 import weewx
@@ -585,8 +586,7 @@ if __name__ == '__main__':
         add_respond_parser(subparsers)
         options = arg_parser.parse_args()
 
-        config_path = os.path.abspath(options.conf)
-        config_dict = configobj.ConfigObj(config_path, encoding='utf-8', file_error=True)
+        config_path, config_dict = weecfg.read_config(options.conf)
         weewx.debug = 1
         weeutil.logger.setup('weewx', config_dict)
 
