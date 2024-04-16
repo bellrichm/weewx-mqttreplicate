@@ -13,6 +13,8 @@ import paho
 import paho.mqtt
 import paho.mqtt.client
 
+import weeutil
+import weeutil.logger
 import weewx
 import weewx.drivers
 import weewx.engine
@@ -585,6 +587,9 @@ if __name__ == '__main__':
 
         config_path = os.path.abspath(options.conf)
         config_dict = configobj.ConfigObj(config_path, encoding='utf-8', file_error=True)
+        weewx.debug = 1
+        weeutil.logger.setup('weewx', config_dict)
+
         del config_dict['Engine']
         replicator_config_dict = {}
         replicator_config_dict['Engine'] = {}
