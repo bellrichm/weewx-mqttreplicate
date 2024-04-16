@@ -609,6 +609,9 @@ if __name__ == '__main__':
 
             engine = weewx.engine.DummyEngine(config_dict)
             mqtt_requester = MQTTRequester(engine, config_dict)
+            # ToDO: Hack to wait for connect to happen
+            # ToDo: Should I put some logic in MQTTRequester?
+            time.sleep(10)
             mqtt_requester.request_catchup(None)
             try:
                 while True:
@@ -622,11 +625,7 @@ if __name__ == '__main__':
 
             engine = weewx.engine.DummyEngine(config_dict)
             mqtt_responder = MQTTResponder(engine, config_dict)
-            try:
-                while True:
-                    time.sleep(2)
-            except KeyboardInterrupt:            
-                mqtt_responder.shutDown()
+            mqtt_responder.shutDown()
         else:
             arg_parser.print_help()
 
