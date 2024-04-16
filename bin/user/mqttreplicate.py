@@ -1,14 +1,18 @@
 ''' Replicate WeeWX dstabases using MQTT request/response functionality.'''
 import abc
+import argparse
+import json
 import logging
+import os
 import random
 import threading
 import time
 
-import json
+import configobj
 import paho
 import paho.mqtt
 import paho.mqtt.client
+
 import weewx
 import weewx.drivers
 import weewx.engine
@@ -396,7 +400,6 @@ class MQTTRequester(weewx.engine.StdService):
             self.logger.loginf("Requester not enabled, exiting.")
             return
 
-        self.manager_dict = weewx.manager.get_manager_dict_from_config(config_dict, 'wx_binding')
         self.client_id = 'MQTTReplicateRequest-' + str(random.randint(1000, 9999))
 
         self.data_bindings = {}
@@ -408,10 +411,14 @@ class MQTTRequester(weewx.engine.StdService):
             self.data_bindings[_primary_data_binding]['manager_dict'] = \
                 weewx.manager.get_manager_dict_from_config(config_dict, _secondary_data_binding)
             self.data_bindings[_primary_data_binding]['dbmanager'] = None
-            dbmanager = engine.db_binder.get_manager(_secondary_data_binding)
-            # Find out when the database was last updated.
-            self.data_bindings[_primary_data_binding]['last_good_timestamp'] = dbmanager.lastGoodStamp()
-
+            if 'timestamp' in service_dict['databases'][database_name]:
+                self.data_bindings[_primary_data_binding]['last_good_timestamp'] = \
+                    service_dict['databases'][database_name]['timestamp']
+            else:
+                dbmanager = engine.db_binder.get_manager(_secondary_data_binding)
+                # Find out when the database was last updated.
+                self.data_bindings[_primary_data_binding]['last_good_timestamp'] = \
+                    dbmanager.lastGoodStamp()
 
         self.mqtt_logger = {
             paho.mqtt.client.MQTT_LOG_INFO: self.logger.loginf,
@@ -435,14 +442,15 @@ class MQTTRequester(weewx.engine.StdService):
 
         self.mqtt_client.loop_start()
 
-        self.bind(weewx.STARTUP, self._request_catchup)
+        self.bind(weewx.STARTUP, self.request_catchup)
 
     def shutDown(self):
         """Run when an engine shutdown is requested."""
         self.mqtt_client.disconnect()
         self.mqtt_client.loop_stop()
 
-    def _request_catchup(self, _event):
+    def request_catchup(self, _event):
+        ''' Request the missing data. '''
         qos = 0
         topic = 'replicate/request'
 
@@ -520,11 +528,75 @@ class MQTTRequester(weewx.engine.StdService):
         self.data_bindings[data_binding]['dbmanager'].addRecord(record)
 
 if __name__ == '__main__':
-    print('start')
-    #mqtt_responder = MQTTResponder(None, None)
+    def add_request_parser(parser):
+        ''' Add the requester parser, '''
+        description = '''
+'''
+        subparser = parser.add_parser('request',
+                                      description=description,
+                                      formatter_class=argparse.RawDescriptionHelpFormatter)
 
-    mqtt_requester = MQTTRequester(None, None)
-    mqtt_requester.request_catchup(None)
+        subparser.add_argument("--conf",
+                            required=True,
+                            help="The WeeWX configuration file. Typically weewx.conf.")
+        subparser.add_argument('--timestamp',
+                               type=int,
+                               required=True,
+                               help='The timestamp to replicate from.')
+        subparser.add_argument('--host',
+                               default='localhost',
+                               required=True,
+                               help='The MQTT broker.')
+        subparser.add_argument('--primary-binding',
+                               required=True,
+                               help='The primarary data binding.')
+        subparser.add_argument('--secondary-binding',
+                               required=True,
+                               help='The secondary data binding.')
 
-    mqtt_requester.shutDown()
-    print('done')
+        return subparser
+
+    def main():
+        """ Run it."""
+
+        arg_parser = argparse.ArgumentParser()
+        arg_parser.add_argument('--version',
+                                action='version',
+                                 version=f"mqttreplicate version is {VERSION}")
+
+        subparsers = arg_parser.add_subparsers(dest='command')
+        add_request_parser(subparsers)
+        options = arg_parser.parse_args()
+
+        config_path = os.path.abspath(options.conf)
+        config_dict = configobj.ConfigObj(config_path, encoding='utf-8', file_error=True)
+        del config_dict['Engine']
+        replicator_config_dict = {}
+        replicator_config_dict['Engine'] = {}
+        replicator_config_dict['Engine']['Services'] = {}
+
+        if options.command == 'request':
+            replicator_config_dict['MQTTReplicate'] = {}
+            replicator_config_dict['MQTTReplicate']['Requester'] = {}
+            replicator_config_dict['MQTTReplicate']['Requester']['host'] = options.host
+            replicator_config_dict['MQTTReplicate']['Requester']['databases'] = {}
+            replicator_config_dict['MQTTReplicate']['Requester']['databases']['weewx'] = {}
+            replicator_config_dict['MQTTReplicate']['Requester']['databases']['weewx']\
+                ['timestamp'] = options.timestamp
+            replicator_config_dict['MQTTReplicate']['Requester']['databases']['weewx']\
+                ['primary_data_binding'] = options.primary_binding
+            replicator_config_dict['MQTTReplicate']['Requester']['databases']['weewx']\
+                ['secondary_data_binding'] = options.secondary_binding
+
+            del config_dict['MQTTReplicate']['Requester']
+            config_dict.merge(configobj.ConfigObj(replicator_config_dict))
+
+            engine = weewx.engine.DummyEngine(config_dict)
+            mqtt_requester = MQTTRequester(engine, config_dict)
+            mqtt_requester.request_catchup(None)
+        else:
+            arg_parser.print_help()
+
+        print("done")
+
+    main()

@@ -5,12 +5,20 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python Debugger: Current File",
+            "name": "request replicate",
             "type": "debugpy",
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "justMyCode": false
+            "justMyCode": false,
+            "args": [
+                "request",
+                "--conf",  "~/weewx-data/run/weewx.conf",
+                "--timestamp", "0",
+                "--host", "rmbell-v01.local",
+                "--primary-binding", "wx_binding",
+                "--secondary-binding", "wx_binding",
+            ]
         },
         {
             "name": "weewxd: Full install",
