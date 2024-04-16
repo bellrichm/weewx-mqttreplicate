@@ -297,7 +297,7 @@ class MQTTResponderThread(threading.Thread):
             self.mqtt_client.on_log = self._on_log
         self.mqtt_client.on_message = self._on_message
 
-        self.mqtt_client.connect(service_dict.get('host', 'rmbell-v01.local'),
+        self.mqtt_client.connect(service_dict.get('host', 'localhost'),
                                  service_dict.get('port', 1883),
                                  service_dict.get('keepalive', 60))
 
@@ -436,7 +436,7 @@ class MQTTRequester(weewx.engine.StdService):
             self.mqtt_client.on_log = self._on_log
         self.mqtt_client.on_message = self._on_message
 
-        self.mqtt_client.connect(service_dict.get('host', 'rmbell-v01.local'),
+        self.mqtt_client.connect(service_dict.get('host', 'localhost'),
                                  service_dict.get('port', 1883),
                                  service_dict.get('keepalive', 60))
 
