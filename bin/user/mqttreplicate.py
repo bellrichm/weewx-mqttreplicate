@@ -403,7 +403,8 @@ class MQTTRequester(weewx.engine.StdService):
             return
 
         self.client_id = 'MQTTReplicateRequest-' + str(random.randint(1000, 9999))
-        self.response_topic = service_dict.get('response_topic', f'{RESPONSE_TOPIC}/{self.client_id}')
+        self.response_topic = service_dict.get('response_topic',
+                                               f'{RESPONSE_TOPIC}/{self.client_id}')
         self.request_topic = service_dict.get('request_topic', REQUEST_TOPIC)
 
         self.data_bindings = {}
@@ -612,6 +613,8 @@ if __name__ == '__main__':
             mqtt_requester.shutDown()
         elif options.command == 'respond':
             config_dict.merge(configobj.ConfigObj(replicator_config_dict))
+            if 'enable' in config_dict['MQTTReplicate']['Responder']:
+                del config_dict['MQTTReplicate']['Responder']['enable']
 
             engine = weewx.engine.DummyEngine(config_dict)
             mqtt_responder = MQTTResponder(engine, config_dict)
