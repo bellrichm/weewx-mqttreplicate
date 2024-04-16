@@ -20,6 +20,7 @@ import weewx.engine
 from weeutil.weeutil import to_bool
 
 VERSION = '0.0.1'
+REPLICATE_TOPIC = 'replicate/request'
 
 class Logger():
     ''' Manage the logging '''
@@ -273,6 +274,7 @@ class MQTTResponderThread(threading.Thread):
         service_dict = config_dict.get('MQTTReplicate', {}).get('Responder', {})
         self.logger = logger
         self.client_id = client_id
+        self.topic = service_dict.get('replicate_topic', REPLICATE_TOPIC)
 
         self.data_bindings = {}
         for database_name in service_dict['databases']:
@@ -289,7 +291,6 @@ class MQTTResponderThread(threading.Thread):
             paho.mqtt.client.MQTT_LOG_DEBUG: self.logger.loginf
         }
 
-        self.topic = 'replicate/request'
         self.mqtt_client = MQTTClient.get_client(self.logger, self.client_id, None)
 
         self.mqtt_client.on_connect = self._on_connect
@@ -400,6 +401,7 @@ class MQTTRequester(weewx.engine.StdService):
             self.logger.loginf("Requester not enabled, exiting.")
             return
 
+        self.topic = service_dict.get('replicate_topic', REPLICATE_TOPIC)
         self.client_id = 'MQTTReplicateRequest-' + str(random.randint(1000, 9999))
 
         self.data_bindings = {}
@@ -452,7 +454,6 @@ class MQTTRequester(weewx.engine.StdService):
     def request_catchup(self, _event):
         ''' Request the missing data. '''
         qos = 0
-        topic = 'replicate/request'
 
         for data_binding_name, data_binding in self.data_bindings.items():
             properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
@@ -461,14 +462,14 @@ class MQTTRequester(weewx.engine.StdService):
                 ('data_binding', data_binding_name)
                 ]
 
-            mqtt_message_info = self.mqtt_client.publish(topic,
+            mqtt_message_info = self.mqtt_client.publish(self.topic,
                                                         data_binding['last_good_timestamp'],
                                                         qos,
                                                         False,
                                                         properties=properties)
             self.logger.logdbg((f"Client {self.client_id}"
                         f"  publishing ({int(time.time())}):"
-                        f" {mqtt_message_info.mid} {qos} {topic}"))
+                        f" {mqtt_message_info.mid} {qos} {self.topic}"))
 
     def _on_connect(self, _userdata):
         topic = f'replicate/{self.client_id}/catchup'
