@@ -21,6 +21,7 @@ from weeutil.weeutil import to_bool
 
 VERSION = '0.0.1'
 REPLICATE_TOPIC = 'replicate/request'
+RESPONSE_TOPIC = 'replicate/response'
 
 class Logger():
     ''' Manage the logging '''
@@ -401,8 +402,9 @@ class MQTTRequester(weewx.engine.StdService):
             self.logger.loginf("Requester not enabled, exiting.")
             return
 
-        self.topic = service_dict.get('replicate_topic', REPLICATE_TOPIC)
         self.client_id = 'MQTTReplicateRequest-' + str(random.randint(1000, 9999))
+        self.response_topic = service_dict.get('response_topic', f'{RESPONSE_TOPIC}/{self.client_id}')
+        self.topic = service_dict.get('replicate_topic', REPLICATE_TOPIC)
 
         self.data_bindings = {}
         for database_name in service_dict['databases']:
@@ -457,7 +459,7 @@ class MQTTRequester(weewx.engine.StdService):
 
         for data_binding_name, data_binding in self.data_bindings.items():
             properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
-            properties.ResponseTopic = f'replicate/{self.client_id}/catchup'
+            properties.ResponseTopic = self.response_topic
             properties.UserProperty = [
                 ('data_binding', data_binding_name)
                 ]
@@ -472,10 +474,9 @@ class MQTTRequester(weewx.engine.StdService):
                         f" {mqtt_message_info.mid} {qos} {self.topic}"))
 
     def _on_connect(self, _userdata):
-        topic = f'replicate/{self.client_id}/catchup'
-        (result, mid) = self.mqtt_client.subscribe(topic, 0)
+        (result, mid) = self.mqtt_client.subscribe(self.response_topic, 0)
         self.logger.logdbg((f"Client {self.client_id}"
-                         f" subscribing to {topic}"
+                         f" subscribing to {self.response_topic}"
                          f" has a mid {int(mid)}"
                          f" and rc {int(result)}"))
         # dbmanager needs to be created in same thread as on_message called
