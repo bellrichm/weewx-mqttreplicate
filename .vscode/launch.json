@@ -19,6 +19,18 @@
                 "--primary-binding", "wx_binding",
                 "--secondary-binding", "wx_binding",
             ]
+        },        
+        {
+            "name": "respond replicate",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": [
+                "respond",
+                "--conf",  "~/weewx-data/run/weewx.conf",
+            ]
         },
         {
             "name": "weewxd: Full install",

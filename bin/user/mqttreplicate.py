@@ -556,6 +556,18 @@ if __name__ == '__main__':
 
         return subparser
 
+    def add_respond_parser(parser):
+        ''' Add the requester parser, '''
+        description = '''
+'''
+        subparser = parser.add_parser('respond',
+                                      description=description,
+                                      formatter_class=argparse.RawDescriptionHelpFormatter)
+
+        subparser.add_argument("--conf",
+                            required=True,
+                            help="The WeeWX configuration file. Typically weewx.conf.")
+
     def main():
         """ Run it."""
 
@@ -566,6 +578,7 @@ if __name__ == '__main__':
 
         subparsers = arg_parser.add_subparsers(dest='command')
         add_request_parser(subparsers)
+        add_respond_parser(subparsers)
         options = arg_parser.parse_args()
 
         config_path = os.path.abspath(options.conf)
@@ -594,6 +607,13 @@ if __name__ == '__main__':
             engine = weewx.engine.DummyEngine(config_dict)
             mqtt_requester = MQTTRequester(engine, config_dict)
             mqtt_requester.request_catchup(None)
+            mqtt_requester.shutDown()
+        elif options.command == 'respond':
+            config_dict.merge(configobj.ConfigObj(replicator_config_dict))
+
+            engine = weewx.engine.DummyEngine(config_dict)
+            mqtt_responder = MQTTResponder(engine, config_dict)
+            mqtt_responder.shutDown()
         else:
             arg_parser.print_help()
 
