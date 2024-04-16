@@ -20,7 +20,7 @@ import weewx.engine
 from weeutil.weeutil import to_bool
 
 VERSION = '0.0.1'
-REPLICATE_TOPIC = 'replicate/request'
+REQUEST_TOPIC = 'replicate/request'
 RESPONSE_TOPIC = 'replicate/response'
 
 class Logger():
@@ -275,7 +275,7 @@ class MQTTResponderThread(threading.Thread):
         service_dict = config_dict.get('MQTTReplicate', {}).get('Responder', {})
         self.logger = logger
         self.client_id = client_id
-        self.topic = service_dict.get('replicate_topic', REPLICATE_TOPIC)
+        self.request_topic = service_dict.get('request_topic', REQUEST_TOPIC)
 
         self.data_bindings = {}
         for database_name in service_dict['databases']:
@@ -321,9 +321,9 @@ class MQTTResponderThread(threading.Thread):
         self.mqtt_client.disconnect()
 
     def _on_connect(self, _userdata):
-        (result, mid) = self.mqtt_client.subscribe(self.topic, 0)
+        (result, mid) = self.mqtt_client.subscribe(self.request_topic, 0)
         self.logger.logdbg((f"Client {self.client_id}"
-                    f" subscribing to {self.topic}"
+                    f" subscribing to {self.request_topic}"
                     f" has a mid {int(mid)}"
                     f" and rc {int(result)}"))
 
@@ -404,7 +404,7 @@ class MQTTRequester(weewx.engine.StdService):
 
         self.client_id = 'MQTTReplicateRequest-' + str(random.randint(1000, 9999))
         self.response_topic = service_dict.get('response_topic', f'{RESPONSE_TOPIC}/{self.client_id}')
-        self.topic = service_dict.get('replicate_topic', REPLICATE_TOPIC)
+        self.request_topic = service_dict.get('request_topic', REQUEST_TOPIC)
 
         self.data_bindings = {}
         for database_name in service_dict['databases']:
@@ -464,14 +464,14 @@ class MQTTRequester(weewx.engine.StdService):
                 ('data_binding', data_binding_name)
                 ]
 
-            mqtt_message_info = self.mqtt_client.publish(self.topic,
+            mqtt_message_info = self.mqtt_client.publish(self.request_topic,
                                                         data_binding['last_good_timestamp'],
                                                         qos,
                                                         False,
                                                         properties=properties)
             self.logger.logdbg((f"Client {self.client_id}"
                         f"  publishing ({int(time.time())}):"
-                        f" {mqtt_message_info.mid} {qos} {self.topic}"))
+                        f" {mqtt_message_info.mid} {qos} {self.request_topic}"))
 
     def _on_connect(self, _userdata):
         (result, mid) = self.mqtt_client.subscribe(self.response_topic, 0)
