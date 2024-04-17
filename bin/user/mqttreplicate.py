@@ -1,9 +1,9 @@
 ''' Replicate WeeWX dstabases using MQTT request/response functionality.'''
+# pylint: disable=fixme
 import abc
 import argparse
 import json
 import logging
-import os
 import random
 import threading
 import time
@@ -586,7 +586,7 @@ if __name__ == '__main__':
         add_respond_parser(subparsers)
         options = arg_parser.parse_args()
 
-        config_path, config_dict = weecfg.read_config(options.conf)
+        _config_path, config_dict = weecfg.read_config(options.conf)
         weewx.debug = 1
         weeutil.logger.setup('weewx', config_dict)
 
@@ -633,7 +633,7 @@ if __name__ == '__main__':
             try:
                 while True:
                     time.sleep(2)
-            except KeyboardInterrupt:            
+            except KeyboardInterrupt:
                 mqtt_responder.shutDown()
         else:
             arg_parser.print_help()
