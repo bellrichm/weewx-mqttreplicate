@@ -265,11 +265,14 @@ class MQTTResponder(weewx.engine.StdService):
         service_dict = config_dict.get('MQTTReplicate', {}).get('Responder', {})
         self.request_topic = service_dict.get('request_topic', REQUEST_TOPIC)
         self.archive_topic = service_dict.get('archive_topic', ARCHIVE_TOPIC)
+        delta = service_dict.get('delta', 60)
 
         self.data_bindings = {}
         for database_name in service_dict['databases']:
             _data_binding = service_dict['databases'][database_name]['data_binding']
             self.data_bindings[_data_binding] = {}
+            self.data_bindings[_data_binding]['delta'] = \
+            service_dict['databases'][database_name].get('delta', delta)
             self.data_bindings[_data_binding]['type'] = \
                 service_dict['databases'][database_name].get('type', 'secondary')
             manager_dict = weewx.manager.get_manager_dict_from_config(config_dict, _data_binding)
@@ -314,7 +317,9 @@ class MQTTResponder(weewx.engine.StdService):
                 payload = json.dumps(event.record)
             else:
                 timestamp = event.record['dateTime']
-                record = data_binding['dbmanager'].getRecord(timestamp)
+                # some extensions do not force the timestamp to be on an interval
+                record = data_binding['dbmanager'].getRecord(timestamp,
+                                                             max_delta=data_binding['delta'])
                 if record:
                     payload = json.dumps(record)
                 else:
