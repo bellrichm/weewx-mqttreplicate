@@ -5,7 +5,6 @@ import argparse
 import json
 import logging
 import random
-import threading
 import time
 
 import configobj
@@ -25,6 +24,7 @@ from weeutil.weeutil import to_bool
 VERSION = '0.0.1'
 REQUEST_TOPIC = 'replicate/request'
 RESPONSE_TOPIC = 'replicate/response'
+ARCHIVE_TOPIC = 'replicate/archive'
 
 class Logger():
     ''' Manage the logging '''
@@ -262,30 +262,19 @@ class MQTTResponder(weewx.engine.StdService):
 
         self.client_id = 'MQTTReplicateRespond-' + str(random.randint(1000, 9999))
 
-        self._thread = MQTTResponderThread(self.logger, self.client_id, config_dict)
-        self._thread.start()
-
-    def shutDown(self):
-        """Run when an engine shutdown is requested."""
-        if self._thread:
-            self.logger.loginf(f"Client {self.client_id} SHUTDOWN - thread initiated")
-            self._thread.shut_down()
-
-class MQTTResponderThread(threading.Thread):
-    ''' Manage the MQTT communication for the "server" that sends the data. '''
-    def __init__(self, logger, client_id, config_dict):
-        threading.Thread.__init__(self)
         service_dict = config_dict.get('MQTTReplicate', {}).get('Responder', {})
-        self.logger = logger
-        self.client_id = client_id
         self.request_topic = service_dict.get('request_topic', REQUEST_TOPIC)
+        self.archive_topic = service_dict.get('archive_topic', ARCHIVE_TOPIC)
 
         self.data_bindings = {}
         for database_name in service_dict['databases']:
             _data_binding = service_dict['databases'][database_name]['data_binding']
             self.data_bindings[_data_binding] = {}
-            self.data_bindings[_data_binding]['manager_dict'] = \
-                weewx.manager.get_manager_dict_from_config(config_dict, _data_binding)
+            self.data_bindings[_data_binding]['type'] = \
+                service_dict['databases'][database_name].get('type', 'secondary')
+            manager_dict = weewx.manager.get_manager_dict_from_config(config_dict, _data_binding)
+            self.data_bindings[_data_binding]['dbmanager'] = \
+                weewx.manager.open_manager(manager_dict)
 
         self.mqtt_logger = {
             paho.mqtt.client.MQTT_LOG_INFO: self.logger.loginf,
@@ -294,6 +283,8 @@ class MQTTResponderThread(threading.Thread):
             paho.mqtt.client.MQTT_LOG_ERR: self.logger.loginf,
             paho.mqtt.client.MQTT_LOG_DEBUG: self.logger.loginf
         }
+
+        self.bind(weewx.NEW_ARCHIVE_RECORD, self.new_archive_record)
 
         self.mqtt_client = MQTTClient.get_client(self.logger, self.client_id, None)
 
@@ -306,22 +297,39 @@ class MQTTResponderThread(threading.Thread):
                                  service_dict.get('port', 1883),
                                  service_dict.get('keepalive', 60))
 
-    def run(self):
-        self.logger.logdbg(f"Client {self.client_id} starting MQTT loop")
-        # Need to get the database manager in the thread that is used
-        for _, data_binding in self.data_bindings.items():
-            data_binding['dbmanager'] = weewx.manager.open_manager(data_binding['manager_dict'])
-
-        self.mqtt_client.client.loop_forever()
-
-        for _, data_binding in self.data_bindings.items():
-            data_binding['dbmanager'].close()
-        self.logger.logdbg(f"Client {self.client_id} MQTT loop ended.")
+        self.mqtt_client.loop_start()
 
     def shut_down(self):
         ''' Perform operations to terminate MQTT.'''
+        for _, data_binding in self.data_bindings.items():
+            data_binding['dbmanager'].close()
         self.logger.loginf(f'Client {self.client_id} shutting down the MQTT client.')
         self.mqtt_client.disconnect()
+        self.mqtt_client.loop_stop()
+
+    def new_archive_record(self, event):
+        ''' Handle the new_archive_record event.'''
+        for data_binding_name, data_binding in self.data_bindings.items():
+            if data_binding['type'] == 'main':
+                payload = json.dumps(event.record)
+            else:
+                timestamp = event.record['dateTime']
+                record = data_binding['dbmanager'].getRecord(timestamp)
+                if record:
+                    payload = json.dumps(record)
+                else:
+                    continue
+
+            properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
+            properties.UserProperty = [
+                ('data_binding', data_binding_name)
+                ]
+            mqtt_message_info = self.mqtt_client.publish(self.archive_topic,
+                                                        payload,
+                                                        0,
+                                                        False,
+                                                        properties=properties)
+            print(mqtt_message_info)
 
     def _on_connect(self, _userdata):
         (result, mid) = self.mqtt_client.subscribe(self.request_topic, 0)
