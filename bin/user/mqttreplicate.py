@@ -313,6 +313,7 @@ class MQTTResponder(weewx.engine.StdService):
     def new_archive_record(self, event):
         ''' Handle the new_archive_record event.'''
         for data_binding_name, data_binding in self.data_bindings.items():
+            qos = 0
             if data_binding['type'] == 'main':
                 payload = json.dumps(event.record)
             else:
@@ -323,18 +324,23 @@ class MQTTResponder(weewx.engine.StdService):
                 if record:
                     payload = json.dumps(record)
                 else:
+                    self.logger.loginf(f'Client {self.client_id} binding {data_binding_name} timestamp {timestamp} no record.')
                     continue
 
             properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
             properties.UserProperty = [
                 ('data_binding', data_binding_name)
                 ]
+            self.logger.logdbg(f'Client {self.client_id} publishing binding: {data_binding_name},  payload: {payload}.')
             mqtt_message_info = self.mqtt_client.publish(self.archive_topic,
                                                         payload,
-                                                        0,
+                                                        qos,
                                                         False,
                                                         properties=properties)
-            print(mqtt_message_info)
+            self.logger.logdbg((f"Client {self.client_id}"
+                                f" binding {data_binding_name}"
+                                f" publishing ({int(time.time())}):"
+                                f" {mqtt_message_info.mid} {qos} {self.archive_topic}"))
 
     def _on_connect(self, _userdata):
         (result, mid) = self.mqtt_client.subscribe(self.request_topic, 0)
@@ -399,7 +405,7 @@ class MQTTResponder(weewx.engine.StdService):
             self.logger.logdbg(f'Client {self.client_id} response is: {payload}.')
             mqtt_message_info = self.mqtt_client.publish(response_topic,
                                                         payload,
-                                                        0,
+                                                        qos,
                                                         False,
                                                         properties=properties)
             self.logger.logdbg((f"Client {self.client_id}"
