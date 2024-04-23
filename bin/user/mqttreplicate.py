@@ -4,10 +4,10 @@ import abc
 import argparse
 import json
 import logging
+import queue
 import random
 import time
 
-import configobj
 import paho
 import paho.mqtt
 import paho.mqtt.client
@@ -19,9 +19,11 @@ import weewx
 import weewx.drivers
 import weewx.engine
 
-from weeutil.weeutil import to_bool
+from weeutil.weeutil import to_bool, to_int
 
 VERSION = '0.0.1'
+DRIVER_NAME = 'MQTTRequester'
+DRIVER_VERSION = VERSION
 REQUEST_TOPIC = 'replicate/request'
 RESPONSE_TOPIC = 'replicate/response'
 ARCHIVE_TOPIC = 'replicate/archive'
@@ -324,14 +326,18 @@ class MQTTResponder(weewx.engine.StdService):
                 if record:
                     payload = json.dumps(record)
                 else:
-                    self.logger.loginf(f'Client {self.client_id} binding {data_binding_name} timestamp {timestamp} no record.')
+                    self.logger.loginf((f'Client {self.client_id}'
+                                       f' binding {data_binding_name}'
+                                       f' timestamp {timestamp} no record.'))
                     continue
 
             properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
             properties.UserProperty = [
                 ('data_binding', data_binding_name)
                 ]
-            self.logger.logdbg(f'Client {self.client_id} publishing binding: {data_binding_name},  payload: {payload}.')
+            self.logger.logdbg((f'Client {self.client_id}'
+                                f' publishing binding: {data_binding_name},'
+                                f' payload: {payload}.'))
             mqtt_message_info = self.mqtt_client.publish(self.archive_topic,
                                                         payload,
                                                         qos,
@@ -412,40 +418,41 @@ class MQTTResponder(weewx.engine.StdService):
                                 f"  publishing ({int(time.time())}):"
                                 f" {mqtt_message_info.mid} {qos} {response_topic}"))
 
-class MQTTRequester(weewx.engine.StdService):
-    ''' The "client" class that data ts replicated to. '''
-    def __init__(self, engine, config_dict):
-        super().__init__(engine, config_dict)
-        self.logger = Logger()
-        service_dict = config_dict.get('MQTTReplicate', {}).get('Requester', {})
+def loader(config_dict, engine):
+    """ Load and return the driver. """
+    return MQTTRequester(config_dict, engine) # pragma: no cover
 
-        enable = to_bool(service_dict.get('enable', True))
+class MQTTRequester(weewx.drivers.AbstractDevice):
+    ''' The "client" class that data ts replicated to. '''
+    def __init__(self, config_dict, _engine):
+        self.logger = Logger()
+        stn_dict = config_dict['MQTTReplicate']['Requester']
+
+        enable = to_bool(stn_dict.get('enable', True))
         if not enable:
             self.logger.loginf("Requester not enabled, exiting.")
             return
 
+        self.the_time = time.time()
+        self.loop_interval = float(stn_dict.get('loop_interval', 2.5))
+        self._archive_interval = to_int(stn_dict.get('archive_interval', 300))
+        self.wait_before_retry = float(stn_dict.get('wait_before_retry', 2))
+        self.archive_topic = stn_dict.get('archive_topic', ARCHIVE_TOPIC)
+
         self.client_id = 'MQTTReplicateRequest-' + str(random.randint(1000, 9999))
-        self.response_topic = service_dict.get('response_topic',
+        self.response_topic = stn_dict.get('response_topic',
                                                f'{RESPONSE_TOPIC}/{self.client_id}')
-        self.request_topic = service_dict.get('request_topic', REQUEST_TOPIC)
+        self.request_topic = stn_dict.get('request_topic', REQUEST_TOPIC)
 
         self.data_bindings = {}
-        for database_name in service_dict['databases']:
-            _primary_data_binding = service_dict['databases'][database_name]['primary_data_binding']
+        for database_name in stn_dict['databases']:
+            _primary_data_binding = stn_dict['databases'][database_name]['primary_data_binding']
             _secondary_data_binding = \
-                service_dict['databases'][database_name]['secondary_data_binding']
+                stn_dict['databases'][database_name]['secondary_data_binding']
             self.data_bindings[_primary_data_binding] = {}
             self.data_bindings[_primary_data_binding]['manager_dict'] = \
                 weewx.manager.get_manager_dict_from_config(config_dict, _secondary_data_binding)
             self.data_bindings[_primary_data_binding]['dbmanager'] = None
-            if 'timestamp' in service_dict['databases'][database_name]:
-                self.data_bindings[_primary_data_binding]['last_good_timestamp'] = \
-                    service_dict['databases'][database_name]['timestamp']
-            else:
-                dbmanager = engine.db_binder.get_manager(_secondary_data_binding)
-                # Find out when the database was last updated.
-                self.data_bindings[_primary_data_binding]['last_good_timestamp'] = \
-                    dbmanager.lastGoodStamp()
 
         self.mqtt_logger = {
             paho.mqtt.client.MQTT_LOG_INFO: self.logger.loginf,
@@ -459,28 +466,55 @@ class MQTTRequester(weewx.engine.StdService):
 
         self.mqtt_client.on_connect = self._on_connect
         self.mqtt_client.on_disconnect = self._on_disconnect
-        if service_dict.get('log_mqtt', False):
+        if stn_dict.get('log_mqtt', False):
             self.mqtt_client.on_log = self._on_log
         self.mqtt_client.on_message = self._on_message
 
-        self.mqtt_client.connect(service_dict.get('host', 'localhost'),
-                                 service_dict.get('port', 1883),
-                                 service_dict.get('keepalive', 60))
+        self.mqtt_client.connect(stn_dict.get('host', 'localhost'),
+                                 stn_dict.get('port', 1883),
+                                 stn_dict.get('keepalive', 60))
+
+        self.data_queue = queue.Queue()
 
         self.mqtt_client.loop_start()
 
-        self.bind(weewx.STARTUP, self.request_catchup)
+    @property
+    def hardware_name(self):
+        """ The name of the hardware driver. """
+        return DRIVER_NAME
 
-    def shutDown(self):
+    @property
+    def archive_interval(self):
+        """ The archive interval. """
+        return self._archive_interval
+
+    def genArchiveRecords(self, _lastgood_ts):
+        while True:
+            try:
+                yield self.data_queue.get(True ,self.wait_before_retry)
+            except queue.Empty:
+                pass
+
+    def genLoopPackets(self):
+        while True:
+            sleep_time = self.the_time + self.loop_interval - time.time()
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+
+            self.the_time += self.loop_interval
+            yield {'dateTime': int(self.the_time+0.5),
+                   'usUnits' : weewx.US }
+
+    def closePort(self):
         """Run when an engine shutdown is requested."""
         self.mqtt_client.disconnect()
         self.mqtt_client.loop_stop()
 
-    def request_catchup(self, _event):
+    def genStartupRecords(self, last_ts):
         ''' Request the missing data. '''
         qos = 0
 
-        for data_binding_name, data_binding in self.data_bindings.items():
+        for data_binding_name, _data_binding in self.data_bindings.items():
             properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
             properties.ResponseTopic = self.response_topic
             properties.UserProperty = [
@@ -488,13 +522,17 @@ class MQTTRequester(weewx.engine.StdService):
                 ]
 
             mqtt_message_info = self.mqtt_client.publish(self.request_topic,
-                                                        data_binding['last_good_timestamp'],
+                                                        last_ts,
                                                         qos,
                                                         False,
                                                         properties=properties)
             self.logger.logdbg((f"Client {self.client_id}"
+                        f"  data_binding ({data_binding_name}):"
                         f"  publishing ({int(time.time())}):"
                         f" {mqtt_message_info.mid} {qos} {self.request_topic}"))
+            print("published")
+
+        yield from()
 
     def _on_connect(self, _userdata):
         (result, mid) = self.mqtt_client.subscribe(self.response_topic, 0)
@@ -502,6 +540,13 @@ class MQTTRequester(weewx.engine.StdService):
                          f" subscribing to {self.response_topic}"
                          f" has a mid {int(mid)}"
                          f" and rc {int(result)}"))
+
+        (result, mid) = self.mqtt_client.subscribe(self.archive_topic, 0)
+        self.logger.logdbg((f"Client {self.client_id}"
+                         f" subscribing to {self.archive_topic}"
+                         f" has a mid {int(mid)}"
+                         f" and rc {int(result)}"))     
+
         # dbmanager needs to be created in same thread as on_message called
         for _, data_binding in self.data_bindings.items():
             if not data_binding['dbmanager']:
@@ -516,7 +561,7 @@ class MQTTRequester(weewx.engine.StdService):
     def _on_log(self, _client, _userdata, level, msg):
         self.mqtt_logger[level](f"Client {self.client_id} MQTT log: {msg}")
 
-    def _on_message(self, _userdata, msg):
+    def _on_message(self, msg):
         self.logger.logdbg((f"Client {self.client_id}:"
                             f" topic: {msg.topic},"
                             f" QOS: {int(msg.qos)},"
@@ -550,7 +595,10 @@ class MQTTRequester(weewx.engine.StdService):
             return
 
         record = json.loads(msg.payload.decode('utf-8'))
-        self.data_bindings[data_binding]['dbmanager'].addRecord(record)
+        if self.data_bindings[data_binding]['type'] == 'main':
+            self.data_queue.put(record)
+        else:
+            self.data_bindings[data_binding]['dbmanager'].addRecord(record)
 
 if __name__ == '__main__':
     def add_request_parser(parser):
@@ -610,40 +658,21 @@ if __name__ == '__main__':
         weeutil.logger.setup('weewx', config_dict)
 
         del config_dict['Engine']
-        replicator_config_dict = {}
-        replicator_config_dict['Engine'] = {}
-        replicator_config_dict['Engine']['Services'] = {}
+        config_dict['Engine'] = {}
+        config_dict['Engine']['Services'] = {}
 
         if options.command == 'request':
-            replicator_config_dict['MQTTReplicate'] = {}
-            replicator_config_dict['MQTTReplicate']['Requester'] = {}
-            replicator_config_dict['MQTTReplicate']['Requester']['host'] = options.host
-            replicator_config_dict['MQTTReplicate']['Requester']['databases'] = {}
-            replicator_config_dict['MQTTReplicate']['Requester']['databases']['weewx'] = {}
-            if options.timestamp:
-                replicator_config_dict['MQTTReplicate']['Requester']['databases']['weewx']\
-                    ['timestamp'] = options.timestamp
-            replicator_config_dict['MQTTReplicate']['Requester']['databases']['weewx']\
-                ['primary_data_binding'] = options.primary_binding
-            replicator_config_dict['MQTTReplicate']['Requester']['databases']['weewx']\
-                ['secondary_data_binding'] = options.secondary_binding
-
-            del config_dict['MQTTReplicate']['Requester']
-            config_dict.merge(configobj.ConfigObj(replicator_config_dict))
-
             engine = weewx.engine.DummyEngine(config_dict)
-            mqtt_requester = MQTTRequester(engine, config_dict)
+            mqtt_requester = MQTTRequester(config_dict, engine)
             # ToDO: Hack to wait for connect to happen
             # ToDo: Should I put some logic in MQTTRequester?
             time.sleep(10)
-            mqtt_requester.request_catchup(None)
-            try:
-                while True:
-                    time.sleep(2)
-            except KeyboardInterrupt:
-                mqtt_requester.shutDown()
+            for record in mqtt_requester.genStartupRecords(options.timestamp):
+                print(record)
+            time.sleep(1)
+            print('done')
         elif options.command == 'respond':
-            config_dict.merge(configobj.ConfigObj(replicator_config_dict))
+            #config_dict.merge(configobj.ConfigObj(replicator_config_dict))
             if 'enable' in config_dict['MQTTReplicate']['Responder']:
                 del config_dict['MQTTReplicate']['Responder']['enable']
 
