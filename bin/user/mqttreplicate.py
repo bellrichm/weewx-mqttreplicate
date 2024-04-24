@@ -492,7 +492,7 @@ class MQTTResponderThread(threading.Thread):
                                                                  properties=data['properties'])
                     self.logger.logdbg((f"Client {self.client_id} {data['topic']}"
                                         f"  published {mqtt_message_info.mid} {qos}"))                
-                self.logger.loginf((f"Client {self.client_id} {data['topic']}"
+                self.logger.loginf((f"Client {self.client_id} {data['topic']} {data['properties']}"
                                     f"  published {record_count} records."))                            
             except queue.Empty:
                 pass
