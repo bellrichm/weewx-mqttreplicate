@@ -518,7 +518,7 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
         self.the_time = time.time()
         self.loop_interval = float(stn_dict.get('loop_interval', 2.5))
         self._archive_interval = to_int(stn_dict.get('archive_interval', 300))
-        self.wait_before_retry = float(stn_dict.get('wait_before_retry', 2))
+        self.wait_before_retry = float(stn_dict.get('wait_before_retry', 10))
         self.archive_topic = stn_dict.get('archive_topic', ARCHIVE_TOPIC)
 
         self.client_id = 'MQTTReplicateRequest-' + str(random.randint(1000, 9999))
@@ -575,9 +575,10 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
     def genArchiveRecords(self, _lastgood_ts):
         while True:
             try:
+                # ToDo: needs rework
                 yield self.data_queue.get(True ,self.wait_before_retry)
             except queue.Empty:
-                pass
+                break
 
     def genLoopPackets(self):
         while True:
