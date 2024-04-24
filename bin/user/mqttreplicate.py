@@ -506,11 +506,6 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
         self.logger = Logger()
         stn_dict = config_dict['MQTTReplicate']['Requester']
 
-        enable = to_bool(stn_dict.get('enable', True))
-        if not enable:
-            self.logger.loginf("Requester not enabled, exiting.")
-            return
-
         self.the_time = time.time()
         self.loop_interval = float(stn_dict.get('loop_interval', 2.5))
         self._archive_interval = to_int(stn_dict.get('archive_interval', 300))
@@ -528,6 +523,8 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
             _secondary_data_binding = \
                 stn_dict['databases'][database_name]['secondary_data_binding']
             self.data_bindings[_primary_data_binding] = {}
+            self.data_bindings[_primary_data_binding]['type'] = \
+                stn_dict['databases'][database_name].get('type', 'secondary')
             self.data_bindings[_primary_data_binding]['manager_dict'] = \
                 weewx.manager.get_manager_dict_from_config(config_dict, _secondary_data_binding)
             self.data_bindings[_primary_data_binding]['dbmanager'] = None
@@ -604,23 +601,24 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
                                                         qos,
                                                         False,
                                                         properties=properties)
-            self.logger.logdbg((f"Client {self.client_id}"
+            self.logger.loginf((f"Client {self.client_id}"
+                        f"  topic ({self.request_topic}):"            
                         f"  data_binding ({data_binding_name}):"
-                        f"  publishing ({int(time.time())}):"
-                        f" {mqtt_message_info.mid} {qos} {self.request_topic}"))
-            print("published")
+                        f"  publishing ({last_ts}):"
+                        f"  properties ({properties}):"                        
+                        f" {mqtt_message_info.mid} {qos}"))
 
         yield from()
 
     def _on_connect(self, _userdata):
         (result, mid) = self.mqtt_client.subscribe(self.response_topic, 0)
-        self.logger.logdbg((f"Client {self.client_id}"
+        self.logger.loginf((f"Client {self.client_id}"
                          f" subscribing to {self.response_topic}"
                          f" has a mid {int(mid)}"
                          f" and rc {int(result)}"))
 
         (result, mid) = self.mqtt_client.subscribe(self.archive_topic, 0)
-        self.logger.logdbg((f"Client {self.client_id}"
+        self.logger.loginf((f"Client {self.client_id}"
                          f" subscribing to {self.archive_topic}"
                          f" has a mid {int(mid)}"
                          f" and rc {int(result)}"))     
@@ -639,7 +637,7 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
     def _on_log(self, _client, _userdata, level, msg):
         self.mqtt_logger[level](f"Client {self.client_id} MQTT log: {msg}")
 
-    def _on_message(self, msg):
+    def _on_message(self, _userdata, msg):
         self.logger.logdbg((f"Client {self.client_id}:"
                             f" topic: {msg.topic},"
                             f" QOS: {int(msg.qos)},"
@@ -673,9 +671,12 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
             return
 
         record = json.loads(msg.payload.decode('utf-8'))
-        if self.data_bindings[data_binding]['type'] == 'main':
+        if msg.topic == self.archive_topic:
             self.data_queue.put(record)
         else:
+            # Add the record directly to the database
+            # This means a new_archive_record is not fired
+            # But it is much faster
             self.data_bindings[data_binding]['dbmanager'].addRecord(record)
 
 if __name__ == '__main__':
