@@ -293,7 +293,7 @@ class MQTTResponder(weewx.engine.StdService):
             paho.mqtt.client.MQTT_LOG_DEBUG: self.logger.loginf
         }
 
-        #self.bind(weewx.NEW_ARCHIVE_RECORD, self.new_archive_record)
+        self.bind(weewx.NEW_ARCHIVE_RECORD, self.new_archive_record)
 
         self.data_queue = queue.Queue()
         self._thread = MQTTResponderThread(self.logger,
@@ -363,7 +363,7 @@ class MQTTResponder(weewx.engine.StdService):
 
     def _on_connect(self, _userdata):
         (result, mid) = self.mqtt_client.subscribe(self.request_topic, 0)
-        self.logger.logdbg((f"Client {self.client_id}"
+        self.logger.loginf((f"Client {self.client_id}"
                     f" subscribing to {self.request_topic}"
                     f" has a mid {int(mid)}"
                     f" and rc {int(result)}"))
@@ -417,11 +417,12 @@ class MQTTResponder(weewx.engine.StdService):
         self.logger.logdbg((f'Client {self.client_id}'
                             f' responding on response topic: {response_topic}'))
 
-        self.data_queue.put({'topic': response_topic,
-                             'start_timestamp': start_timestamp,
-                             'data_binding': data_binding,
-                             'properties': properties})
-        print("queued")
+        data = {'topic': response_topic,
+                'start_timestamp': start_timestamp,
+                'data_binding': data_binding,
+                'properties': properties}               
+        self.data_queue.put(data)
+        self.logger.logdbg(self.logger.logdbg(f'Client {self.client_id} queued: {data}'))
 
 class MQTTResponderThread(threading.Thread):
     '''  Publish the requested data. '''
@@ -467,7 +468,7 @@ class MQTTResponderThread(threading.Thread):
         self.mqtt_client.disconnect()
 
     def run(self):
-        print("starting loop")
+        self.logger.logdbg(f"Client {self.client_id} starting queue loop")
         for data_binding_name, data_binding in self.data_bindings.items():
             manager_dict = weewx.manager.get_manager_dict_from_config(self.config_dict,
                                                                       data_binding_name)
@@ -482,7 +483,7 @@ class MQTTResponderThread(threading.Thread):
                     record_count += 1
                     payload = json.dumps(record)
                     qos = 0
-                    self.logger.logdbg((f'Client {self.client_id} {data["topic"]}'
+                    self.logger.logdbg((f'Client {self.client_id} {data["topic"]} {data["data_binding"]}'
                                         f' publishing is: {payload}.'))
                     mqtt_message_info = self.mqtt_client.publish(data['topic'],
                                                                  payload,
@@ -491,12 +492,12 @@ class MQTTResponderThread(threading.Thread):
                                                                  properties=data['properties'])
                     self.logger.logdbg((f"Client {self.client_id} {data['topic']}"
                                         f"  published {mqtt_message_info.mid} {qos}"))                
-                self.logger.logdbg((f"Client {self.client_id} {data['topic']}"
+                self.logger.loginf((f"Client {self.client_id} {data['topic']}"
                                     f"  published {record_count} records."))                            
             except queue.Empty:
                 pass
 
-        print("loop ended")
+        self.logger.logdbg(f"Client {self.client_id} queue loop ended")
         for data_binding_name, data_binding in self.data_bindings.items():
             data_binding['dbmanager'].close()
 
@@ -679,7 +680,7 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
             return
 
         record = json.loads(msg.payload.decode('utf-8'))
-        if msg.topic == self.archive_topic:
+        if msg.topic == self.archive_topic and self.data_bindings[data_binding]['type'] == 'main':
             self.data_queue.put(record)
         else:
             # Add the record directly to the database
