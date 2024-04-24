@@ -269,6 +269,9 @@ class MQTTResponder(weewx.engine.StdService):
         self.request_topic = service_dict.get('request_topic', REQUEST_TOPIC)
         self.archive_topic = service_dict.get('archive_topic', ARCHIVE_TOPIC)
         delta = service_dict.get('delta', 60)
+        host = service_dict.get('host', 'localhost')
+        port = service_dict.get('port', 1883)
+        keepalive = service_dict.get('keepalive', 60)
 
         self.data_bindings = {}
         for database_name in service_dict['databases']:
@@ -294,13 +297,13 @@ class MQTTResponder(weewx.engine.StdService):
 
         self.data_queue = queue.Queue()
         self._thread = MQTTResponderThread(self.logger,
-                                           60,
+                                           delta,
                                            config_dict,
                                            False,
                                            self.data_queue,
-                                           'workhorse.local',
-                                           1883,
-                                           60)
+                                           host,
+                                           port,
+                                           keepalive)
         self._thread.start()
 
         self.mqtt_client = MQTTClient.get_client(self.logger, self.client_id, None)
@@ -310,10 +313,7 @@ class MQTTResponder(weewx.engine.StdService):
             self.mqtt_client.on_log = self._on_log
         self.mqtt_client.on_message = self._on_message
 
-        self.mqtt_client.connect(service_dict.get('host', 'localhost'),
-                                 service_dict.get('port', 1883),
-                                 service_dict.get('keepalive', 60))
-
+        self.mqtt_client.connect(host, port, keepalive)
         self.mqtt_client.loop_start()
 
     def shut_down(self):
@@ -323,6 +323,7 @@ class MQTTResponder(weewx.engine.StdService):
         self.logger.loginf(f'Client {self.client_id} shutting down the MQTT client.')
         self.mqtt_client.disconnect()
         self.mqtt_client.loop_stop()
+        self._thread.shut_down()
 
     def new_archive_record(self, event):
         ''' Handle the new_archive_record event.'''
@@ -466,6 +467,7 @@ class MQTTResponderThread(threading.Thread):
         self.mqtt_client.disconnect()
 
     def run(self):
+        print("starting loop")
         for data_binding_name, data_binding in self.data_bindings.items():
             manager_dict = weewx.manager.get_manager_dict_from_config(self.config_dict,
                                                                       data_binding_name)
@@ -474,23 +476,29 @@ class MQTTResponderThread(threading.Thread):
         while True:
             try:
                 data = self.data_queue.get(True, 5)
-                print(data)
+                record_count = 0
                 for record in self.data_bindings[data['data_binding']]['dbmanager']\
                                                  .genBatchRecords(data['start_timestamp']):
+                    record_count += 1
                     payload = json.dumps(record)
                     qos = 0
-                    self.logger.logdbg(f'Client {self.client_id} response is: {payload}.')
+                    self.logger.logdbg((f'Client {self.client_id} {data["topic"]}'
+                                        f' publishing is: {payload}.'))
                     mqtt_message_info = self.mqtt_client.publish(data['topic'],
                                                                  payload,
                                                                  qos,
                                                                  False,
                                                                  properties=data['properties'])
-                    self.logger.logdbg((f"Client {self.client_id}"
-                                        f"  publishing ({int(time.time())}):"
-                                        f" {mqtt_message_info.mid} {qos} {data['topic']}"))                
-                print('published')
+                    self.logger.logdbg((f"Client {self.client_id} {data['topic']}"
+                                        f"  published {mqtt_message_info.mid} {qos}"))                
+                self.logger.logdbg((f"Client {self.client_id} {data['topic']}"
+                                    f"  published {record_count} records."))                            
             except queue.Empty:
                 pass
+
+        print("loop ended")
+        for data_binding_name, data_binding in self.data_bindings.items():
+            data_binding['dbmanager'].close()
 
     def _on_log(self, _client, _userdata, level, msg):
         self.mqtt_logger[level](f"Client {self.client_id} MQTT log: {msg}")
