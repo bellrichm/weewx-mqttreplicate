@@ -266,7 +266,11 @@ class MQTTResponder(weewx.engine.StdService):
         self.client_id = 'MQTTReplicateRespond-' + str(random.randint(1000, 9999))
 
         service_dict = config_dict.get('MQTTReplicate', {}).get('Responder', {})
-        self.request_topic = service_dict.get('request_topic', REQUEST_TOPIC)
+        if len(service_dict.sections)> 1:
+            raise AttributeError("Only one instance is allowed.")
+
+        instance_name = service_dict.sections[0]
+        self.request_topic = service_dict.get('request_topic', f'{REQUEST_TOPIC}/{instance_name}')
         self.archive_topic = service_dict.get('archive_topic', ARCHIVE_TOPIC)
         delta = service_dict.get('delta', 60)
         host = service_dict.get('host', 'localhost')
@@ -274,13 +278,13 @@ class MQTTResponder(weewx.engine.StdService):
         keepalive = service_dict.get('keepalive', 60)
 
         self.data_bindings = {}
-        for database_name in service_dict['databases']:
-            _data_binding = service_dict['databases'][database_name]['data_binding']
+        for database_name in service_dict[instance_name]:
+            _data_binding = service_dict[instance_name][database_name]['data_binding']
             self.data_bindings[_data_binding] = {}
             self.data_bindings[_data_binding]['delta'] = \
-            service_dict['databases'][database_name].get('delta', delta)
+            service_dict[instance_name][database_name].get('delta', delta)
             self.data_bindings[_data_binding]['type'] = \
-                service_dict['databases'][database_name].get('type', 'secondary')
+                service_dict[instance_name][database_name].get('type', 'secondary')
             manager_dict = weewx.manager.get_manager_dict_from_config(config_dict, _data_binding)
             self.data_bindings[_data_binding]['dbmanager'] = \
                 weewx.manager.open_manager(manager_dict)
@@ -435,13 +439,14 @@ class MQTTResponderThread(threading.Thread):
         self.data_bindings = {}
 
         service_dict = config_dict.get('MQTTReplicate', {}).get('Responder', {})
-        for database_name in service_dict['databases']:
-            _data_binding = service_dict['databases'][database_name]['data_binding']
+        instance_name = service_dict.sections[0]
+        for database_name in service_dict[instance_name]:
+            _data_binding = service_dict[instance_name][database_name]['data_binding']
             self.data_bindings[_data_binding] = {}
             self.data_bindings[_data_binding]['delta'] = \
-            service_dict['databases'][database_name].get('delta', delta)
+            service_dict[instance_name][database_name].get('delta', delta)
             self.data_bindings[_data_binding]['type'] = \
-                service_dict['databases'][database_name].get('type', 'secondary')
+                service_dict[instance_name][database_name].get('type', 'secondary')
             manager_dict = weewx.manager.get_manager_dict_from_config(config_dict, _data_binding)
             self.data_bindings[_data_binding]['dbmanager'] = \
                 weewx.manager.open_manager(manager_dict)
@@ -483,7 +488,8 @@ class MQTTResponderThread(threading.Thread):
                     record_count += 1
                     payload = json.dumps(record)
                     qos = 0
-                    self.logger.logdbg((f'Client {self.client_id} {data["topic"]} {data["data_binding"]}'
+                    self.logger.logdbg((f'Client {self.client_id} {data["topic"]}'
+                                        f' {data["data_binding"]}'
                                         f' publishing is: {payload}.'))
                     mqtt_message_info = self.mqtt_client.publish(data['topic'],
                                                                  payload,
@@ -523,20 +529,24 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
 
         self.client_id = 'MQTTReplicateRequest-' + str(random.randint(1000, 9999))
         self.response_topic = stn_dict.get('response_topic',
-                                               f'{RESPONSE_TOPIC}/{self.client_id}')
-        self.request_topic = stn_dict.get('request_topic', REQUEST_TOPIC)
+                                           f'{RESPONSE_TOPIC}/{self.client_id}')
+        request_topic = stn_dict.get('request_topic', REQUEST_TOPIC)
 
         self.data_bindings = {}
-        for database_name in stn_dict['databases']:
-            _primary_data_binding = stn_dict['databases'][database_name]['primary_data_binding']
-            _secondary_data_binding = \
-                stn_dict['databases'][database_name]['secondary_data_binding']
-            self.data_bindings[_primary_data_binding] = {}
-            self.data_bindings[_primary_data_binding]['type'] = \
-                stn_dict['databases'][database_name].get('type', 'secondary')
-            self.data_bindings[_primary_data_binding]['manager_dict'] = \
-                weewx.manager.get_manager_dict_from_config(config_dict, _secondary_data_binding)
-            self.data_bindings[_primary_data_binding]['dbmanager'] = None
+        for instance_name in stn_dict.sections:
+            for database_name in stn_dict[instance_name]:
+                _primary_data_binding = \
+                    stn_dict[instance_name][database_name]['primary_data_binding']
+                _secondary_data_binding = \
+                    stn_dict[instance_name][database_name]['secondary_data_binding']
+                self.data_bindings[_primary_data_binding] = {}
+                self.data_bindings[_primary_data_binding]['request_topic'] = \
+                    f'{request_topic}/{instance_name}'
+                self.data_bindings[_primary_data_binding]['type'] = \
+                    stn_dict[instance_name][database_name].get('type', 'secondary')
+                self.data_bindings[_primary_data_binding]['manager_dict'] = \
+                    weewx.manager.get_manager_dict_from_config(config_dict, _secondary_data_binding)
+                self.data_bindings[_primary_data_binding]['dbmanager'] = None
 
         self.mqtt_logger = {
             paho.mqtt.client.MQTT_LOG_INFO: self.logger.loginf,
@@ -599,20 +609,20 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
         ''' Request the missing data. '''
         qos = 0
 
-        for data_binding_name, _data_binding in self.data_bindings.items():
+        for data_binding_name, data_binding in self.data_bindings.items():
             properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
             properties.ResponseTopic = self.response_topic
             properties.UserProperty = [
                 ('data_binding', data_binding_name)
                 ]
 
-            mqtt_message_info = self.mqtt_client.publish(self.request_topic,
+            mqtt_message_info = self.mqtt_client.publish(data_binding['request_topic'],
                                                         last_ts,
                                                         qos,
                                                         False,
                                                         properties=properties)
             self.logger.loginf((f"Client {self.client_id}"
-                        f"  topic ({self.request_topic}):"            
+                        f"  topic ({data_binding['request_topic']}):"            
                         f"  data_binding ({data_binding_name}):"
                         f"  publishing ({last_ts}):"
                         f"  properties ({properties}):"                        
