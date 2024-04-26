@@ -331,6 +331,7 @@ class MQTTResponder(weewx.engine.StdService):
 
     def new_archive_record(self, event):
         ''' Handle the new_archive_record event.'''
+        # ToDo: Publish main last, so new_archive_record event on secondary instance is fired after other dbs are updated
         for data_binding_name, data_binding in self.data_bindings.items():
             qos = 0
             if data_binding['type'] == 'main':
@@ -568,7 +569,7 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
                                  stn_dict.get('port', 1883),
                                  stn_dict.get('keepalive', 60))
 
-        self.data_queue = queue.Queue()
+        self.data_queue = queue.PriorityQueue()
 
         self.mqtt_client.loop_start()
 
@@ -691,12 +692,13 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
             return
 
         record = json.loads(msg.payload.decode('utf-8'))
-        if msg.topic == self.archive_topic and self.data_bindings[data_binding]['type'] == 'main':
-            self.data_queue.put(record)
+        if self.data_bindings[data_binding]['type'] == 'main':
+            # For all records from the 'main' db, create an archive_record
+            # This would be the expected behavior if genStartupRecords returned them
+            # But the records are 'requested' in genStartup and 'returned' in genArchive
+            # ToDo: research if this is a good idea, or if 'catchup' should be added directly
+            self.data_queue.put(record['dateTime'], record)
         else:
-            # Add the record directly to the database
-            # This means a new_archive_record is not fired
-            # But it is much faster
             self.data_bindings[data_binding]['dbmanager'].addRecord(record)
 
 if __name__ == '__main__':
