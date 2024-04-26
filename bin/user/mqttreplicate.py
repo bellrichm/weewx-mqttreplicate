@@ -548,6 +548,10 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
                 self.data_bindings[_primary_data_binding]['manager_dict'] = \
                     weewx.manager.get_manager_dict_from_config(config_dict, _secondary_data_binding)
                 self.data_bindings[_primary_data_binding]['dbmanager'] = None
+                if self.data_bindings[_primary_data_binding]['type'] == 'main':
+                    dbmanager = weewx.manager.open_manager(\
+                        self.data_bindings[_primary_data_binding]['manager_dict'])
+                    last_good_timestamp = dbmanager.lastGoodStamp()
 
         self.mqtt_logger = {
             paho.mqtt.client.MQTT_LOG_INFO: self.logger.loginf,
@@ -573,6 +577,11 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
 
         self.mqtt_client.loop_start()
 
+        # Request any possible missing records
+        # Do it now, so hopefully queue is primed when genStartupRecords is called
+        # ToDo: wait until have sucessfully subscribed to request topic
+        self.request_records(last_good_timestamp)
+
     @property
     def hardware_name(self):
         """ The name of the hardware driver. """
@@ -583,11 +592,19 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
         """ The archive interval. """
         return self._archive_interval
 
+    def genStartupRecords(self, _lastgood_ts):
+        while True:
+            try:
+                # ToDo: needs rework
+                yield self.data_queue.get(True ,self.wait_before_retry)[1]
+            except queue.Empty:
+                break
+
     def genArchiveRecords(self, _lastgood_ts):
         while True:
             try:
                 # ToDo: needs rework
-                yield self.data_queue.get(True ,self.wait_before_retry)
+                yield self.data_queue.get(True ,self.wait_before_retry)[1]
             except queue.Empty:
                 break
 
@@ -606,7 +623,7 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
         self.mqtt_client.disconnect()
         self.mqtt_client.loop_stop()
 
-    def genStartupRecords(self, last_ts):
+    def request_records(self, last_ts):
         ''' Request the missing data. '''
         qos = 0
 
@@ -628,8 +645,6 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
                         f"  publishing ({last_ts}):"
                         f"  properties ({properties}):"                        
                         f" {mqtt_message_info.mid} {qos}"))
-
-        yield from()
 
     def _on_connect(self, _userdata):
         (result, mid) = self.mqtt_client.subscribe(self.response_topic, 0)
@@ -697,7 +712,7 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
             # This would be the expected behavior if genStartupRecords returned them
             # But the records are 'requested' in genStartup and 'returned' in genArchive
             # ToDo: research if this is a good idea, or if 'catchup' should be added directly
-            self.data_queue.put(record['dateTime'], record)
+            self.data_queue.put((record['dateTime'], record))
         else:
             self.data_bindings[data_binding]['dbmanager'].addRecord(record)
 
