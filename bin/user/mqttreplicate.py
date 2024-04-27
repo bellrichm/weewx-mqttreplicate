@@ -288,6 +288,8 @@ class MQTTResponder(weewx.engine.StdService):
             manager_dict = weewx.manager.get_manager_dict_from_config(config_dict, _data_binding)
             self.data_bindings[_data_binding]['dbmanager'] = \
                 weewx.manager.open_manager(manager_dict)
+            if self.data_bindings[_data_binding]['type'] == 'main':
+                self.main_data_binding = _data_binding
 
         self.mqtt_logger = {
             paho.mqtt.client.MQTT_LOG_INFO: self.logger.loginf,
@@ -331,40 +333,45 @@ class MQTTResponder(weewx.engine.StdService):
 
     def new_archive_record(self, event):
         ''' Handle the new_archive_record event.'''
-        # ToDo: Publish main last, so new_archive_record event on secondary instance is fired after other dbs are updated
         for data_binding_name, data_binding in self.data_bindings.items():
             qos = 0
             if data_binding['type'] == 'main':
-                payload = json.dumps(event.record)
-            else:
-                timestamp = event.record['dateTime']
-                # some extensions do not force the timestamp to be on an interval
-                record = data_binding['dbmanager'].getRecord(timestamp,
-                                                             max_delta=data_binding['delta'])
-                if record:
-                    payload = json.dumps(record)
-                else:
-                    self.logger.loginf((f'Client {self.client_id}'
-                                       f' binding {data_binding_name}'
-                                       f' timestamp {timestamp} no record.'))
-                    continue
+                continue
 
-            properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
-            properties.UserProperty = [
-                ('data_binding', data_binding_name)
-                ]
-            self.logger.logdbg((f'Client {self.client_id}'
-                                f' publishing binding: {data_binding_name},'
-                                f' payload: {payload}.'))
-            mqtt_message_info = self.mqtt_client.publish(self.archive_topic,
-                                                        payload,
-                                                        qos,
-                                                        False,
-                                                        properties=properties)
-            self.logger.logdbg((f"Client {self.client_id}"
-                                f" binding {data_binding_name}"
-                                f" publishing ({int(time.time())}):"
-                                f" {mqtt_message_info.mid} {qos} {self.archive_topic}"))
+            timestamp = event.record['dateTime']
+            # some extensions do not force the timestamp to be on an interval
+            record = data_binding['dbmanager'].getRecord(timestamp,
+                                                            max_delta=data_binding['delta'])
+            if record:
+                payload = json.dumps(record)
+                self.publish_payload(data_binding_name, qos, payload)
+
+            else:
+                self.logger.loginf((f'Client {self.client_id}'
+                                    f' binding {data_binding_name}'
+                                    f' timestamp {timestamp} no record.'))
+
+        payload = json.dumps(event.record)
+        self.publish_payload(self.main_data_binding, qos, payload)
+
+    def publish_payload(self, data_binding_name, qos, payload):
+        ''' Publish the record. '''
+        properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
+        properties.UserProperty = [
+            ('data_binding', data_binding_name)
+            ]
+        self.logger.logdbg((f'Client {self.client_id}'
+                            f' publishing binding: {data_binding_name},'
+                            f' payload: {payload}.'))
+        mqtt_message_info = self.mqtt_client.publish(self.archive_topic,
+                                                    payload,
+                                                    qos,
+                                                    False,
+                                                    properties=properties)
+        self.logger.logdbg((f"Client {self.client_id}"
+                            f" binding {data_binding_name}"
+                            f" publishing ({int(time.time())}):"
+                            f" {mqtt_message_info.mid} {qos} {self.archive_topic}"))
 
     def _on_connect(self, _userdata):
         (result, mid) = self.mqtt_client.subscribe(self.request_topic, 0)
@@ -627,6 +634,8 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
         ''' Request the missing data. '''
         qos = 0
 
+        # ToDo: request type 'main' last, so that new_archive_record event fired after other DBs are updated
+        # But the priority queue might reorder them... no because non main are not queued??
         for data_binding_name, data_binding in self.data_bindings.items():
             properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
             properties.ResponseTopic = self.response_topic
