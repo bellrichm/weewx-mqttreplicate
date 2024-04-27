@@ -556,6 +556,7 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
                     weewx.manager.get_manager_dict_from_config(config_dict, _secondary_data_binding)
                 self.data_bindings[_primary_data_binding]['dbmanager'] = None
                 if self.data_bindings[_primary_data_binding]['type'] == 'main':
+                    self.main_data_binding = _primary_data_binding
                     dbmanager = weewx.manager.open_manager(\
                         self.data_bindings[_primary_data_binding]['manager_dict'])
                     last_good_timestamp = dbmanager.lastGoodStamp()
@@ -587,7 +588,20 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
         # Request any possible missing records
         # Do it now, so hopefully queue is primed when genStartupRecords is called
         # ToDo: wait until have sucessfully subscribed to request topic
-        self.request_records(last_good_timestamp)
+        qos = 0
+        # Request 'main' db last, so that new_archive_record event fired after other DBs are updated
+        for data_binding_name, data_binding in self.data_bindings.items():
+            if data_binding['type'] == 'main':
+                continue
+            self.request_records(data_binding_name,
+                                 qos,
+                                 data_binding['request_topic'],
+                                 last_good_timestamp)
+
+        self.request_records(self.main_data_binding,
+                             qos,
+                             self.data_bindings[self.main_data_binding]['request_topic'],
+                             last_good_timestamp)
 
     @property
     def hardware_name(self):
@@ -630,30 +644,25 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
         self.mqtt_client.disconnect()
         self.mqtt_client.loop_stop()
 
-    def request_records(self, last_ts):
+    def request_records(self, data_binding_name, qos, topic, last_ts):
         ''' Request the missing data. '''
-        qos = 0
+        properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
+        properties.ResponseTopic = self.response_topic
+        properties.UserProperty = [
+            ('data_binding', data_binding_name)
+            ]
 
-        # ToDo: request type 'main' last, so that new_archive_record event fired after other DBs are updated
-        # But the priority queue might reorder them... no because non main are not queued??
-        for data_binding_name, data_binding in self.data_bindings.items():
-            properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
-            properties.ResponseTopic = self.response_topic
-            properties.UserProperty = [
-                ('data_binding', data_binding_name)
-                ]
-
-            mqtt_message_info = self.mqtt_client.publish(data_binding['request_topic'],
+        mqtt_message_info = self.mqtt_client.publish(topic,
                                                         last_ts,
                                                         qos,
                                                         False,
                                                         properties=properties)
-            self.logger.loginf((f"Client {self.client_id}"
-                        f"  topic ({data_binding['request_topic']}):"            
-                        f"  data_binding ({data_binding_name}):"
-                        f"  publishing ({last_ts}):"
-                        f"  properties ({properties}):"                        
-                        f" {mqtt_message_info.mid} {qos}"))
+        self.logger.loginf((f"Client {self.client_id}"
+                            f"  topic ({topic}):"            
+                            f"  data_binding ({data_binding_name}):"
+                            f"  publishing ({last_ts}):"
+                            f"  properties ({properties}):"                        
+                            f" {mqtt_message_info.mid} {qos}"))
 
     def _on_connect(self, _userdata):
         (result, mid) = self.mqtt_client.subscribe(self.response_topic, 0)
@@ -718,9 +727,6 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
         record = json.loads(msg.payload.decode('utf-8'))
         if self.data_bindings[data_binding]['type'] == 'main':
             # For all records from the 'main' db, create an archive_record
-            # This would be the expected behavior if genStartupRecords returned them
-            # But the records are 'requested' in genStartup and 'returned' in genArchive
-            # ToDo: research if this is a good idea, or if 'catchup' should be added directly
             self.data_queue.put((record['dateTime'], record))
         else:
             self.data_bindings[data_binding]['dbmanager'].addRecord(record)
