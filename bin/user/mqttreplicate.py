@@ -576,6 +576,9 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
         if stn_dict.get('log_mqtt', False):
             self.mqtt_client.on_log = self._on_log
         self.mqtt_client.on_message = self._on_message
+        self.mqtt_client.on_subscribe = self._on_subscribe
+        self.response_topic_mid = None
+        self.subscribed = False
 
         self.mqtt_client.connect(stn_dict.get('host', 'localhost'),
                                  stn_dict.get('port', 1883),
@@ -585,11 +588,13 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
 
         self.mqtt_client.loop_start()
 
+        self.logger.loginf("Waiting for MQTT subscription.")
+        while not self.subscribed:
+            time.sleep(1)
+
         # Request any possible missing records
         # Do it now, so hopefully queue is primed when genStartupRecords is called
-        # ToDo: wait until have sucessfully subscribed to request topic
         qos = 0
-        # Request 'main' db last, so that new_archive_record event fired after other DBs are updated
         for data_binding_name, data_binding in self.data_bindings.items():
             if data_binding['type'] == 'main':
                 continue
@@ -598,6 +603,7 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
                                  data_binding['request_topic'],
                                  last_good_timestamp)
 
+        # Request 'main' db last, so that new_archive_record event fired after other DBs are updated
         self.request_records(self.main_data_binding,
                              qos,
                              self.data_bindings[self.main_data_binding]['request_topic'],
@@ -670,12 +676,13 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
                          f" subscribing to {self.response_topic}"
                          f" has a mid {int(mid)}"
                          f" and rc {int(result)}"))
+        self.response_topic_mid = mid
 
         (result, mid) = self.mqtt_client.subscribe(self.archive_topic, 0)
         self.logger.loginf((f"Client {self.client_id}"
                          f" subscribing to {self.archive_topic}"
                          f" has a mid {int(mid)}"
-                         f" and rc {int(result)}"))     
+                         f" and rc {int(result)}"))
 
         # dbmanager needs to be created in same thread as on_message called
         for _, data_binding in self.data_bindings.items():
@@ -730,6 +737,10 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
             self.data_queue.put((record['dateTime'], record))
         else:
             self.data_bindings[data_binding]['dbmanager'].addRecord(record)
+
+    def _on_subscribe(self, _userdata, mid):
+        if mid == self.response_topic_mid:
+            self.subscribed = True
 
 if __name__ == '__main__':
     def add_request_parser(parser):
