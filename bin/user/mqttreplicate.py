@@ -259,7 +259,7 @@ class MQTTResponder(weewx.engine.StdService):
 
         if not to_bool(config_dict.get('MQTTReplicate', {})\
                        .get('Responder', {})\
-                        .get('enable', True)):
+                       .get('enable', True)):
             self.logger.loginf("Responder not enabled, exiting.")
             return
 
@@ -324,9 +324,10 @@ class MQTTResponder(weewx.engine.StdService):
 
     def shut_down(self):
         ''' Perform operations to terminate MQTT.'''
+        self.logger.loginf(f'Client {self.client_id} shutting down.')
         for _, data_binding in self.data_bindings.items():
             data_binding['dbmanager'].close()
-        self.logger.loginf(f'Client {self.client_id} shutting down the MQTT client.')
+
         self.mqtt_client.disconnect()
         self.mqtt_client.loop_stop()
         self._thread.shut_down()
@@ -340,12 +341,10 @@ class MQTTResponder(weewx.engine.StdService):
 
             timestamp = event.record['dateTime']
             # some extensions do not force the timestamp to be on an interval
-            record = data_binding['dbmanager'].getRecord(timestamp,
-                                                            max_delta=data_binding['delta'])
+            record = data_binding['dbmanager'].getRecord(timestamp,max_delta=data_binding['delta'])
             if record:
                 payload = json.dumps(record)
                 self.publish_payload(data_binding_name, qos, payload)
-
             else:
                 self.logger.loginf((f'Client {self.client_id}'
                                     f' binding {data_binding_name}'
@@ -370,7 +369,6 @@ class MQTTResponder(weewx.engine.StdService):
                                                     properties=properties)
         self.logger.logdbg((f"Client {self.client_id}"
                             f" binding {data_binding_name}"
-                            f" publishing ({int(time.time())}):"
                             f" {mqtt_message_info.mid} {qos} {self.archive_topic}"))
 
     def _on_connect(self, _userdata):
@@ -384,7 +382,7 @@ class MQTTResponder(weewx.engine.StdService):
         self.mqtt_logger[level](f"Client {self.client_id} MQTT log: {msg}")
 
     def _on_message(self, _userdata, msg):
-        self.logger.logdbg((f"Client {self.client_id}:"
+        self.logger.logdbg((f"Client {self.client_id} received:"
                             f" topic: {msg.topic},"
                             f" QOS: {int(msg.qos)},"
                             f" retain: {msg.retain},"
@@ -434,7 +432,8 @@ class MQTTResponder(weewx.engine.StdService):
                 'data_binding': data_binding,
                 'properties': properties}               
         self.data_queue.put(data)
-        self.logger.logdbg(self.logger.logdbg(f'Client {self.client_id} queued: {data}'))
+        self.logger.logdbg(self.logger.logdbg(f'Client {self.client_id}'
+                                              f' {data_binding} {response_topic} queued: {data}'))
 
 class MQTTResponderThread(threading.Thread):
     '''  Publish the requested data. '''
