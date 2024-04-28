@@ -293,6 +293,7 @@ class MQTTResponder(weewx.engine.StdService):
         host = service_dict.get('host', 'localhost')
         port = service_dict.get('port', 1883)
         keepalive = service_dict.get('keepalive', 60)
+        max_responder_threads = service_dict.get('max_responder_threads', 3)
 
         self.data_bindings = {}
         for database_name in service_dict[instance_name]:
@@ -318,15 +319,15 @@ class MQTTResponder(weewx.engine.StdService):
 
         self.bind(weewx.NEW_ARCHIVE_RECORD, self.new_archive_record)
 
-        self.executor = ThreadPoolExecutor(max_workers=2,
+        self.executor = ThreadPoolExecutor(max_workers=max_responder_threads,
                                            initializer=init_responder_threads,
                                            initargs=(self.logger,
-                                                delta,
-                                                config_dict,
-                                                False,
-                                                host,
-                                                port,
-                                                keepalive))
+                                                     delta,
+                                                     config_dict,
+                                                     False,
+                                                     host,
+                                                     port,
+                                                     keepalive))
 
         self.mqtt_client = MQTTClient.get_client(self.logger, self.client_id, None)
 
@@ -380,10 +381,10 @@ class MQTTResponder(weewx.engine.StdService):
                             f' publishing binding: {data_binding_name},'
                             f' payload: {payload}.'))
         mqtt_message_info = self.mqtt_client.publish(self.archive_topic,
-                                                    payload,
-                                                    qos,
-                                                    False,
-                                                    properties=properties)
+                                                     payload,
+                                                     qos,
+                                                     False,
+                                                     properties=properties)
         self.logger.logdbg((f"Client {self.client_id}"
                             f" binding {data_binding_name}"
                             f" {mqtt_message_info.mid} {qos} {self.archive_topic}"))
@@ -391,9 +392,9 @@ class MQTTResponder(weewx.engine.StdService):
     def _on_connect(self, _userdata):
         (result, mid) = self.mqtt_client.subscribe(self.request_topic, 0)
         self.logger.loginf((f"Client {self.client_id}"
-                    f" subscribing to {self.request_topic}"
-                    f" has a mid {int(mid)}"
-                    f" and rc {int(result)}"))
+                            f" subscribing to {self.request_topic}"
+                            f" has a mid {int(mid)}"
+                            f" and rc {int(result)}"))
 
     def _on_log(self, _client, _userdata, level, msg):
         self.mqtt_logger[level](f"Client {self.client_id} MQTT log: {msg}")
@@ -518,7 +519,6 @@ class MQTTResponderThread():
         self.logger.loginf((f"Client {self.client_id} {data['topic']} {data['properties']}"
                             f"  published {record_count} records."))                            
         self.mqtt_client.disconnect()
-
 
     def _on_log(self, _client, _userdata, level, msg):
         self.mqtt_logger[level](f"Client {self.client_id} MQTT log: {msg}")
