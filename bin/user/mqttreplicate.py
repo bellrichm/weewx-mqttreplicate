@@ -297,7 +297,8 @@ class MQTTResponder(weewx.engine.StdService):
 
         self.data_bindings = {}
         for database_name in service_dict[instance_name]:
-            _data_binding = service_dict[instance_name][database_name]['data_binding']
+            _data_binding = (f"{instance_name}/"
+                             f"{service_dict[instance_name][database_name]['data_binding']}")
             self.data_bindings[_data_binding] = {}
             self.data_bindings[_data_binding]['delta'] = \
             service_dict[instance_name][database_name].get('delta', delta)
@@ -467,7 +468,8 @@ class MQTTResponderThread():
         service_dict = config_dict.get('MQTTReplicate', {}).get('Responder', {})
         instance_name = service_dict.sections[0]
         for database_name in service_dict[instance_name]:
-            _data_binding = service_dict[instance_name][database_name]['data_binding']
+            _data_binding = (f"{instance_name}/"
+                              "{service_dict[instance_name][database_name]['data_binding']}")
             self.data_bindings[_data_binding] = {}
             self.data_bindings[_data_binding]['delta'] = \
             service_dict[instance_name][database_name].get('delta', delta)
@@ -552,18 +554,19 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
                     stn_dict[instance_name][database_name]['primary_data_binding']
                 _secondary_data_binding = \
                     stn_dict[instance_name][database_name]['secondary_data_binding']
-                self.data_bindings[_primary_data_binding] = {}
-                self.data_bindings[_primary_data_binding]['request_topic'] = \
+                _data_binding = f'{instance_name}/{_primary_data_binding}'
+                self.data_bindings[_data_binding] = {}
+                self.data_bindings[_data_binding]['request_topic'] = \
                     f'{request_topic}/{instance_name}'
-                self.data_bindings[_primary_data_binding]['type'] = \
+                self.data_bindings[_data_binding]['type'] = \
                     stn_dict[instance_name][database_name].get('type', 'secondary')
-                self.data_bindings[_primary_data_binding]['manager_dict'] = \
+                self.data_bindings[_data_binding]['manager_dict'] = \
                     weewx.manager.get_manager_dict_from_config(config_dict, _secondary_data_binding)
-                self.data_bindings[_primary_data_binding]['dbmanager'] = None
-                if self.data_bindings[_primary_data_binding]['type'] == 'main':
-                    self.main_data_binding = _primary_data_binding
+                self.data_bindings[_data_binding]['dbmanager'] = None
+                if self.data_bindings[_data_binding]['type'] == 'main':
+                    self.main_data_binding = _data_binding
                     dbmanager = weewx.manager.open_manager(\
-                        self.data_bindings[_primary_data_binding]['manager_dict'])
+                        self.data_bindings[_data_binding]['manager_dict'])
                     last_good_timestamp = dbmanager.lastGoodStamp()
 
         self.mqtt_logger = {
