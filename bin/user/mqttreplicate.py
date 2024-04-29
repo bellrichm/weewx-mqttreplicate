@@ -35,17 +35,19 @@ ARCHIVE_TOPIC = 'replicate/archive'
 responder_threads = {}
 def init_responder_threads(logger, delta, config_dict, log_mqtt, host, port, keepalive):
     ''' Initialize the threads in the pool. '''
-    responder_threads[threading.current_thread] = MQTTResponderThread(logger,
-                                                                      delta,
-                                                                      config_dict,
-                                                                      log_mqtt,
-                                                                      host,
-                                                                      port,
-                                                                      keepalive)
+    logger.logdbg(f"Initializing {threading.current_thread().native_id}")
+    responder_threads[threading.current_thread().native_id] = MQTTResponderThread(logger,
+                                                                                  delta,
+                                                                                  config_dict,
+                                                                                  log_mqtt,
+                                                                                  host,
+                                                                                  port,
+                                                                                  keepalive)
 
 def thread_publisher(data):
     ''' Use a thread to publish the data. '''
-    responder_threads[threading.current_thread].run(data)
+    responder_threads[threading.current_thread().native_id].logger.logdbg(f"Calling {threading.current_thread().native_id} with {data}.")
+    responder_threads[threading.current_thread().native_id].run(data)
 
 class Logger():
     ''' Manage the logging '''
@@ -294,7 +296,7 @@ class MQTTResponder(weewx.engine.StdService):
         host = service_dict.get('host', 'localhost')
         port = service_dict.get('port', 1883)
         keepalive = service_dict.get('keepalive', 60)
-        max_responder_threads = service_dict.get('max_responder_threads', 3)
+        max_responder_threads = service_dict.get('max_responder_threads', 1)
 
         self.data_bindings = {}
         for database_name in service_dict[instance_name]:
@@ -525,7 +527,7 @@ class MQTTResponderThread():
                                 f"  published {record_count} records."))                            
             self.mqtt_client.disconnect()
         except Exception as exception:
-            self.logger.logerr(f"Failed with {type(exception)} and reason {exception}.")
+            self.logger.logerr(f"Failed {threading.current_thread().native_id} {data['data_binding']} with {type(exception)} and reason {exception}.")
             self.logger.logerr(f"{traceback.format_exc()}")
 
     def _on_connect(self, _userdata):
