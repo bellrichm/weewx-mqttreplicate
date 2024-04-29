@@ -46,7 +46,8 @@ def init_responder_threads(logger, delta, config_dict, log_mqtt, host, port, kee
 
 def thread_publisher(data):
     ''' Use a thread to publish the data. '''
-    responder_threads[threading.current_thread().native_id].logger.logdbg(f"Calling {threading.current_thread().native_id} with {data}.")
+    responder_threads[threading.current_thread().native_id]\
+        .logger.logdbg(f"Calling {threading.current_thread().native_id} with {data}.")
     responder_threads[threading.current_thread().native_id].run(data)
 
 class Logger():
@@ -299,15 +300,17 @@ class MQTTResponder(weewx.engine.StdService):
         max_responder_threads = service_dict.get('max_responder_threads', 1)
 
         self.data_bindings = {}
-        for database_name in service_dict[instance_name]:
+        for _database_name, databases in service_dict[instance_name].items():
             _data_binding = (f"{instance_name}/"
-                             f"{service_dict[instance_name][database_name]['data_binding']}")
+                             f"{databases['data_binding']}")
             self.data_bindings[_data_binding] = {}
             self.data_bindings[_data_binding]['delta'] = \
-            service_dict[instance_name][database_name].get('delta', delta)
+            databases.get('delta', delta)
             self.data_bindings[_data_binding]['type'] = \
-                service_dict[instance_name][database_name].get('type', 'secondary')
-            manager_dict = weewx.manager.get_manager_dict_from_config(config_dict, service_dict[instance_name][database_name]['data_binding'])
+                databases.get('type', 'secondary')
+            manager_dict = \
+                weewx.manager.get_manager_dict_from_config(config_dict,
+                                                           databases['data_binding'])
             self.data_bindings[_data_binding]['dbmanager'] = \
                 weewx.manager.open_manager(manager_dict)
             if self.data_bindings[_data_binding]['type'] == 'main':
@@ -466,15 +469,18 @@ class MQTTResponderThread():
 
         service_dict = config_dict.get('MQTTReplicate', {}).get('Responder', {})
         instance_name = service_dict.sections[0]
-        for database_name in service_dict[instance_name]:
+        databases = service_dict[instance_name]
+        for database_name in databases:
             _data_binding = (f"{instance_name}/"
-                            f"{service_dict[instance_name][database_name]['data_binding']}")
+                            f"{databases[database_name]['data_binding']}")
             self.data_bindings[_data_binding] = {}
             self.data_bindings[_data_binding]['delta'] = \
-            service_dict[instance_name][database_name].get('delta', delta)
+            databases[database_name].get('delta', delta)
             self.data_bindings[_data_binding]['type'] = \
-                service_dict[instance_name][database_name].get('type', 'secondary')
-            manager_dict = weewx.manager.get_manager_dict_from_config(config_dict, service_dict[instance_name][database_name]['data_binding'])
+                databases[database_name].get('type', 'secondary')
+            manager_dict = \
+                weewx.manager.get_manager_dict_from_config(config_dict,
+                                                           databases[database_name]['data_binding'])
             self.data_bindings[_data_binding]['dbmanager'] = \
                 weewx.manager.open_manager(manager_dict)
 
@@ -504,7 +510,7 @@ class MQTTResponderThread():
             self.logger.logdbg(f"In MQTTResponderThread.run data: {data}")
 
             self.mqtt_client.connect(self.host, self.port, self.keepalive)
-                                       
+
             record_count = 0
             for record in self.data_bindings[data['data_binding']]['dbmanager']\
                                                 .genBatchRecords(data['start_timestamp']):
@@ -522,12 +528,14 @@ class MQTTResponderThread():
                 mqtt_message_info.wait_for_publish()
                 self.logger.logdbg((f"Client {self.client_id} {data['topic']}"
                                     f"  published {mqtt_message_info.mid} {qos}"))
-                                    
+
             self.logger.loginf((f"Client {self.client_id} {data['topic']} {data['properties']}"
                                 f"  published {record_count} records."))                            
             self.mqtt_client.disconnect()
-        except Exception as exception:
-            self.logger.logerr(f"Failed {threading.current_thread().native_id} {data['data_binding']} with {type(exception)} and reason {exception}.")
+        except Exception as exception: # (want to catch all) pylint: disable=broad-exception-caught
+            self.logger.logerr(f"Failed {threading.current_thread().native_id}"
+                               f" {data['data_binding']}"
+                               f" with {type(exception)} and reason {exception}.")
             self.logger.logerr(f"{traceback.format_exc()}")
 
     def _on_connect(self, _userdata):
