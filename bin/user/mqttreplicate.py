@@ -304,7 +304,7 @@ class MQTTResponder(weewx.engine.StdService):
             service_dict[instance_name][database_name].get('delta', delta)
             self.data_bindings[_data_binding]['type'] = \
                 service_dict[instance_name][database_name].get('type', 'secondary')
-            manager_dict = weewx.manager.get_manager_dict_from_config(config_dict, _data_binding)
+            manager_dict = weewx.manager.get_manager_dict_from_config(config_dict, service_dict[instance_name][database_name]['data_binding'])
             self.data_bindings[_data_binding]['dbmanager'] = \
                 weewx.manager.open_manager(manager_dict)
             if self.data_bindings[_data_binding]['type'] == 'main':
@@ -475,7 +475,7 @@ class MQTTResponderThread():
             service_dict[instance_name][database_name].get('delta', delta)
             self.data_bindings[_data_binding]['type'] = \
                 service_dict[instance_name][database_name].get('type', 'secondary')
-            manager_dict = weewx.manager.get_manager_dict_from_config(config_dict, _data_binding)
+            manager_dict = weewx.manager.get_manager_dict_from_config(config_dict, service_dict[instance_name][database_name]['data_binding'])
             self.data_bindings[_data_binding]['dbmanager'] = \
                 weewx.manager.open_manager(manager_dict)
 
