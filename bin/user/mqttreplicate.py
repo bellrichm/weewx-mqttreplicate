@@ -346,8 +346,7 @@ class MQTTResponder(weewx.engine.StdService):
         self.mqtt_client.connect(host, port, keepalive)
         self.mqtt_client.loop_start()
 
-    def shut_down(self):
-        ''' Perform operations to terminate MQTT.'''
+    def shutDown(self):
         self.logger.loginf(f'Client {self.client_id} shutting down.')
         for _, data_binding in self.data_bindings.items():
             data_binding['dbmanager'].close()
@@ -500,7 +499,7 @@ class MQTTResponderThread():
 
     def shut_down(self):
         ''' Perform operations to terminate MQTT.'''
-        self.logger.loginf(f'Client {self.client_id} shutting down the MQTT client.')
+        self.logger.loginf(f'Client {self.client_id} shutting down the thread.')
         for _data_binding_name, data_binding in self.data_bindings.items():
             data_binding['dbmanager'].close()
 
@@ -822,6 +821,17 @@ if __name__ == '__main__':
                             required=True,
                             help="The WeeWX configuration file. Typically weewx.conf.")
 
+        subparser.add_argument('--host',
+                               default='localhost',
+                               required=True,
+                               help='The MQTT broker.')
+        subparser.add_argument('--instance-name',
+                               required=True,
+                               help='The instance.')
+        subparser.add_argument('--data-binding',
+                               required=True,
+                               help='The data binding.')
+
     def main():
         """ Run it."""
 
@@ -864,9 +874,16 @@ if __name__ == '__main__':
             mqtt_requester.closePort()
             print('done')
         elif options.command == 'respond':
-            if 'enable' in config_dict['MQTTReplicate']['Responder']:
-                del config_dict['MQTTReplicate']['Responder']['enable']
-
+            # ToDO: read from a config file, so that support mutiple bindings
+            del config_dict['MQTTReplicate']['Responder']
+            config_dict['MQTTReplicate']['Responder'] = {
+                'host': options.host,
+                options.instance_name: {
+                    'database': {
+                        'data_binding': options.data_binding,
+                    }
+                },
+            }
             engine = weewx.engine.DummyEngine(config_dict)
             mqtt_responder = MQTTResponder(engine, config_dict)
             try:

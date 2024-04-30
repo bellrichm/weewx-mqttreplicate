@@ -31,6 +31,9 @@
             "args": [
                 "respond",
                 "--conf",  "~/weewx-data/run/weewx.conf",
+                "--host", "weather-data.local",
+                "--instance-name", "weather",
+                "--data-binding", "wx_binding",
             ]
         },
         {
