@@ -14,7 +14,7 @@
             "args": [
                 "request",
                 "--conf",  "~/weewx-data/run/weewx.conf",
-                //"--timestamp", "0",
+                //"--timestamp", "1714480200",
                 "--host", "weather-data.local",
                 "--instance-name", "weather",
                 "--primary-binding", "wx_binding",

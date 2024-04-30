@@ -353,8 +353,10 @@ class MQTTResponder(weewx.engine.StdService):
 
         self.mqtt_client.disconnect()
         self.mqtt_client.loop_stop()
+        # ToDo: Need to submit the shutdown
+        # Is it possible to submit to a thread?
         for _thread in responder_threads:
-            _thread.shut_down()
+            responder_threads[_thread].shut_down()
 
     def new_archive_record(self, event):
         ''' Handle the new_archive_record event.'''
@@ -500,8 +502,8 @@ class MQTTResponderThread():
     def shut_down(self):
         ''' Perform operations to terminate MQTT.'''
         self.logger.loginf(f'Client {self.client_id} shutting down the thread.')
-        for _data_binding_name, data_binding in self.data_bindings.items():
-            data_binding['dbmanager'].close()
+        #for _data_binding_name, data_binding in self.data_bindings.items():
+        #    data_binding['dbmanager'].close()
 
     def run(self, data):
         ''' Publish the data. '''
@@ -862,7 +864,7 @@ if __name__ == '__main__':
                     'database': {
                         'primary_data_binding': options.primary_binding,
                         'secondary_data_binding': options.secondary_binding,
-                        'timestamp': options.timestamp,
+                        'timestamp': int(options.timestamp),
                     }
                 },
             }
