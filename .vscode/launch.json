@@ -15,9 +15,10 @@
                 "request",
                 "--conf",  "~/weewx-data/run/weewx.conf",
                 //"--timestamp", "0",
-                "--host", "rmbell-v01.local",
+                "--host", "weather-data.local",
+                "--instance-name", "weather",
                 "--primary-binding", "wx_binding",
-                "--secondary-binding", "wx_binding",
+                "--secondary-binding", "secondarydb_binding",
             ]
         },        
         {

@@ -566,6 +566,7 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
                                            f'{RESPONSE_TOPIC}/{self.client_id}')
         request_topic = stn_dict.get('request_topic', REQUEST_TOPIC)
 
+        self.main_data_binding = None
         self.data_bindings = {}
         for instance_name in stn_dict.sections:
             for database_name in stn_dict[instance_name]:
@@ -587,6 +588,12 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
                     dbmanager = weewx.manager.open_manager(\
                         self.data_bindings[_data_binding]['manager_dict'])
                     last_good_timestamp = dbmanager.lastGoodStamp()
+
+        if stn_dict.get('command_line'):
+            instance_name = stn_dict.sections[0]
+            database_name = stn_dict[instance_name].sections[0]
+            last_good_timestamp =stn_dict[instance_name][database_name]['timestamp']
+
 
         self.mqtt_logger = {
             paho.mqtt.client.MQTT_LOG_INFO: self.logger.loginf,
@@ -630,11 +637,12 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
                                  data_binding['request_topic'],
                                  last_good_timestamp)
 
-        # Request 'main' db last, so that new_archive_record event fired after other DBs are updated
-        self.request_records(self.main_data_binding,
-                             qos,
-                             self.data_bindings[self.main_data_binding]['request_topic'],
-                             last_good_timestamp)
+        if self.main_data_binding:
+            # Request 'main' last, so new_archive_record event fired after other DBs are updated
+            self.request_records(self.main_data_binding,
+                                qos,
+                                self.data_bindings[self.main_data_binding]['request_topic'],
+                                last_good_timestamp)
 
     @property
     def hardware_name(self):
@@ -782,12 +790,17 @@ if __name__ == '__main__':
                             required=True,
                             help="The WeeWX configuration file. Typically weewx.conf.")
         subparser.add_argument('--timestamp',
+                               #required=True,
                                type=int,
+                               default=time.time() - 600,
                                help='The timestamp to replicate from.')
         subparser.add_argument('--host',
                                default='localhost',
                                required=True,
                                help='The MQTT broker.')
+        subparser.add_argument('--instance-name',
+                               required=True,
+                               help='The instance.')
         subparser.add_argument('--primary-binding',
                                required=True,
                                help='The primarary data binding.')
@@ -831,17 +844,26 @@ if __name__ == '__main__':
         config_dict['Engine']['Services'] = {}
 
         if options.command == 'request':
+            del config_dict['MQTTReplicate']['Requester']
+            config_dict['MQTTReplicate']['Requester'] = {
+                'command_line': True,
+                'host': options.host,
+                options.instance_name: {
+                    'database': {
+                        'primary_data_binding': options.primary_binding,
+                        'secondary_data_binding': options.secondary_binding,
+                        'timestamp': options.timestamp,
+                    }
+                },
+            }
             engine = weewx.engine.DummyEngine(config_dict)
             mqtt_requester = MQTTRequester(config_dict, engine)
-            # ToDO: Hack to wait for connect to happen
-            # ToDo: Should I put some logic in MQTTRequester?
+            # Wait for publishing to happen
+            # ToDo: Make length to sleep a command line option
             time.sleep(10)
-            for record in mqtt_requester.genStartupRecords(options.timestamp):
-                print(record)
-            time.sleep(1)
+            mqtt_requester.closePort()
             print('done')
         elif options.command == 'respond':
-            #config_dict.merge(configobj.ConfigObj(replicator_config_dict))
             if 'enable' in config_dict['MQTTReplicate']['Responder']:
                 del config_dict['MQTTReplicate']['Responder']['enable']
 
