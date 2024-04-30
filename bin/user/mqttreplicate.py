@@ -353,10 +353,11 @@ class MQTTResponder(weewx.engine.StdService):
 
         self.mqtt_client.disconnect()
         self.mqtt_client.loop_stop()
-        # ToDo: Need to submit the shutdown
-        # Is it possible to submit to a thread?
-        for _thread in responder_threads:
-            responder_threads[_thread].shut_down()
+
+        # Hopefully this will release any resources a thread aquired, such as db connections
+        # Note, it probably does not matter much because if the pool is being shut down
+        # WeeWX is probably going down
+        self.executor.shutdown()
 
     def new_archive_record(self, event):
         ''' Handle the new_archive_record event.'''
@@ -498,12 +499,6 @@ class MQTTResponderThread():
         self.mqtt_client.on_connect = self._on_connect
         if log_mqtt:
             self.mqtt_client.on_log = self._on_log
-
-    def shut_down(self):
-        ''' Perform operations to terminate MQTT.'''
-        self.logger.loginf(f'Client {self.client_id} shutting down the thread.')
-        #for _data_binding_name, data_binding in self.data_bindings.items():
-        #    data_binding['dbmanager'].close()
 
     def run(self, data):
         ''' Publish the data. '''
