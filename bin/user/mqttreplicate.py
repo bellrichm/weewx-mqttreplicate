@@ -868,10 +868,11 @@ if __name__ == '__main__':
             }
             engine = weewx.engine.DummyEngine(config_dict)
             mqtt_requester = MQTTRequester(config_dict, engine)
-            # Wait for publishing to happen
-            # ToDo: Make length to sleep a command line option
-            time.sleep(10)
-            mqtt_requester.closePort()
+            try:
+                while True:
+                    time.sleep(2)
+            except KeyboardInterrupt:
+                mqtt_requester.closePort()
             print('done')
         elif options.command == 'respond':
             # ToDO: read from a config file, so that support mutiple bindings
