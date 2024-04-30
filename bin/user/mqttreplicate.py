@@ -588,8 +588,13 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
         if stn_dict.get('command_line'):
             instance_name = stn_dict.sections[0]
             database_name = stn_dict[instance_name].sections[0]
-            last_good_timestamp =stn_dict[instance_name][database_name]['timestamp']
-
+            timestamp = stn_dict[instance_name][database_name].get('timestamp')
+            if timestamp:
+                last_good_timestamp = timestamp
+            else:
+                manager_dict = next(iter(self.data_bindings.values()))['manager_dict']
+                dbmanager = weewx.manager.open_manager(manager_dict)
+                last_good_timestamp = dbmanager.lastGoodStamp()
 
         self.mqtt_logger = {
             paho.mqtt.client.MQTT_LOG_INFO: self.logger.loginf,
@@ -786,9 +791,7 @@ if __name__ == '__main__':
                             required=True,
                             help="The WeeWX configuration file. Typically weewx.conf.")
         subparser.add_argument('--timestamp',
-                               #required=True,
                                type=int,
-                               default=time.time() - 600,
                                help='The timestamp to replicate from.')
         subparser.add_argument('--host',
                                default='localhost',
@@ -859,7 +862,7 @@ if __name__ == '__main__':
                     'database': {
                         'primary_data_binding': options.primary_binding,
                         'secondary_data_binding': options.secondary_binding,
-                        'timestamp': int(options.timestamp),
+                        'timestamp': int(options.timestamp) if options.timestamp else None,
                     }
                 },
             }
