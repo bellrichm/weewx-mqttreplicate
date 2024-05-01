@@ -430,15 +430,20 @@ class MQTTResponder(weewx.engine.StdService):
                 break
 
         if not data_binding:
-            self.logger.logerr(f'Client {self.client_id} has no "data_binding" UserProperty {msg.properties.UserProperty}')
+            self.logger.logerr(f'Client {self.client_id} has no "data_binding" '
+                               f' UserProperty: {msg.properties.UserProperty}')
             self.logger.logerr(f'Client {self.client_id}'
-                               f' skipping topic: {msg.topic} {msg.properties.UserProperty} payload: {msg.payload}')
+                               f' skipping topic: {msg.topic}'
+                               f' UserProperty: {msg.properties.UserProperty}'
+                               f' payload: {msg.payload}')
             return
 
         if data_binding not in self.data_bindings:
             self.logger.logerr(f'Client {self.client_id} has unknown data_binding {data_binding}')
             self.logger.logerr(f'Client {self.client_id}'
-                               f' skipping topic: {msg.topic} {msg.properties.UserProperty} payload: {msg.payload}')
+                               f' skipping topic: {msg.topic}'
+                               f' UserProperty: {msg.properties.UserProperty}'
+                               f' payload: {msg.payload}')
             return
 
         response_topic = msg.properties.ResponseTopic
@@ -547,7 +552,7 @@ def loader(config_dict, engine):
 class MQTTRequester(weewx.drivers.AbstractDevice):
     # (methods not used) pylint: disable=abstract-method
     ''' The "client" class that data ts replicated to. '''
-    def __init__(self, config_dict, _engine):
+    def __init__(self, config_dict, engine):
         self.logger = Logger()
         stn_dict = config_dict['MQTTReplicate']['Requester']
 
@@ -564,6 +569,7 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
 
         self.main_data_binding = None
         self.data_bindings = {}
+
         for instance_name in stn_dict.sections:
             for database_name in stn_dict[instance_name]:
                 _primary_data_binding = \
@@ -578,23 +584,20 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
                     stn_dict[instance_name][database_name].get('type', 'secondary')
                 self.data_bindings[_data_binding]['manager_dict'] = \
                     weewx.manager.get_manager_dict_from_config(config_dict, _secondary_data_binding)
+                db_manager = engine.db_binder.get_manager(data_binding=_secondary_data_binding,
+                                                          initialize=False)
+                self.data_bindings[_data_binding]['last_good_timestamp'] = \
+                    db_manager.lastGoodStamp()
                 self.data_bindings[_data_binding]['dbmanager'] = None
                 if self.data_bindings[_data_binding]['type'] == 'main':
                     self.main_data_binding = _data_binding
-                    dbmanager = weewx.manager.open_manager(\
-                        self.data_bindings[_data_binding]['manager_dict'])
-                    last_good_timestamp = dbmanager.lastGoodStamp()
 
         if stn_dict.get('command_line'):
             instance_name = stn_dict.sections[0]
             database_name = stn_dict[instance_name].sections[0]
             timestamp = stn_dict[instance_name][database_name].get('timestamp')
             if timestamp:
-                last_good_timestamp = timestamp
-            else:
-                manager_dict = next(iter(self.data_bindings.values()))['manager_dict']
-                dbmanager = weewx.manager.open_manager(manager_dict)
-                last_good_timestamp = dbmanager.lastGoodStamp()
+                next(iter(self.data_bindings.values()))['last_good_timestamp'] = timestamp
 
         self.mqtt_logger = {
             paho.mqtt.client.MQTT_LOG_INFO: self.logger.loginf,
@@ -636,14 +639,14 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
             self.request_records(data_binding_name,
                                  qos,
                                  data_binding['request_topic'],
-                                 last_good_timestamp)
+                                 data_binding['last_good_timestamp'])
 
         if self.main_data_binding:
             # Request 'main' last, so new_archive_record event fired after other DBs are updated
             self.request_records(self.main_data_binding,
                                 qos,
                                 self.data_bindings[self.main_data_binding]['request_topic'],
-                                last_good_timestamp)
+                                self.data_bindings[self.main_data_binding]['last_good_timestamp'])
 
     @property
     def hardware_name(self):
