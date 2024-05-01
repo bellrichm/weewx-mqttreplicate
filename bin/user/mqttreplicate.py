@@ -430,15 +430,15 @@ class MQTTResponder(weewx.engine.StdService):
                 break
 
         if not data_binding:
-            self.logger.logerr(f'Client {self.client_id} has no "data_binding" UserProperty')
+            self.logger.logerr(f'Client {self.client_id} has no "data_binding" UserProperty {msg.properties.UserProperty}')
             self.logger.logerr(f'Client {self.client_id}'
-                               f' skipping topic: {msg.topic} payload: {msg.payload}')
+                               f' skipping topic: {msg.topic} {msg.properties.UserProperty} payload: {msg.payload}')
             return
 
         if data_binding not in self.data_bindings:
             self.logger.logerr(f'Client {self.client_id} has unknown data_binding {data_binding}')
             self.logger.logerr(f'Client {self.client_id}'
-                               f' skipping topic: {msg.topic} payload: {msg.payload}')
+                               f' skipping topic: {msg.topic} {msg.properties.UserProperty} payload: {msg.payload}')
             return
 
         response_topic = msg.properties.ResponseTopic
