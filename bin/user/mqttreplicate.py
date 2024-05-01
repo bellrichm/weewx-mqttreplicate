@@ -300,21 +300,17 @@ class MQTTResponder(weewx.engine.StdService):
         max_responder_threads = service_dict.get('max_responder_threads', 1)
 
         self.data_bindings = {}
-        for _database_name, databases in service_dict[instance_name].items():
-            _data_binding = (f"{instance_name}/"
-                             f"{databases['data_binding']}")
-            self.data_bindings[_data_binding] = {}
-            self.data_bindings[_data_binding]['delta'] = \
-            databases.get('delta', delta)
-            self.data_bindings[_data_binding]['type'] = \
-                databases.get('type', 'secondary')
-            manager_dict = \
-                weewx.manager.get_manager_dict_from_config(config_dict,
-                                                           databases['data_binding'])
-            self.data_bindings[_data_binding]['dbmanager'] = \
+        for data_binding_name, data_binding in service_dict[instance_name].items():
+            data_binding_key = f"{instance_name}/{data_binding_name}"
+            self.data_bindings[data_binding_key] = {}
+            self.data_bindings[data_binding_key]['delta'] = data_binding.get('delta', delta)
+            self.data_bindings[data_binding_key]['type'] = data_binding.get('type', 'secondary')
+            manager_dict = weewx.manager.get_manager_dict_from_config(config_dict,
+                                                                      data_binding_name)
+            self.data_bindings[data_binding_key]['dbmanager'] = \
                 weewx.manager.open_manager(manager_dict)
-            if self.data_bindings[_data_binding]['type'] == 'main':
-                self.main_data_binding = _data_binding
+            if self.data_bindings[data_binding_key]['type'] == 'main':
+                self.main_data_binding = data_binding_key
 
         self.mqtt_logger = {
             paho.mqtt.client.MQTT_LOG_INFO: self.logger.loginf,
@@ -476,19 +472,15 @@ class MQTTResponderThread():
 
         service_dict = config_dict.get('MQTTReplicate', {}).get('Responder', {})
         instance_name = service_dict.sections[0]
-        databases = service_dict[instance_name]
-        for database_name in databases:
-            _data_binding = (f"{instance_name}/"
-                            f"{databases[database_name]['data_binding']}")
-            self.data_bindings[_data_binding] = {}
-            self.data_bindings[_data_binding]['delta'] = \
-            databases[database_name].get('delta', delta)
-            self.data_bindings[_data_binding]['type'] = \
-                databases[database_name].get('type', 'secondary')
-            manager_dict = \
-                weewx.manager.get_manager_dict_from_config(config_dict,
-                                                           databases[database_name]['data_binding'])
-            self.data_bindings[_data_binding]['dbmanager'] = \
+
+        for data_binding_name, data_binding in service_dict[instance_name].items():
+            data_binding_key = f"{instance_name}/{data_binding_name}"
+            self.data_bindings[data_binding_key] = {}
+            self.data_bindings[data_binding_key]['delta'] = data_binding.get('delta', delta)
+            self.data_bindings[data_binding_key]['type'] = data_binding.get('type', 'secondary')
+            manager_dict = weewx.manager.get_manager_dict_from_config(config_dict,
+                                                                      data_binding_name)
+            self.data_bindings[data_binding_key]['dbmanager'] = \
                 weewx.manager.open_manager(manager_dict)
 
         self.mqtt_logger = {
@@ -824,17 +816,6 @@ if __name__ == '__main__':
                             required=True,
                             help="The WeeWX configuration file. Typically weewx.conf.")
 
-        subparser.add_argument('--host',
-                               default='localhost',
-                               required=True,
-                               help='The MQTT broker.')
-        subparser.add_argument('--instance-name',
-                               required=True,
-                               help='The instance.')
-        subparser.add_argument('--data-binding',
-                               required=True,
-                               help='The data binding.')
-
     def main():
         """ Run it."""
 
@@ -878,16 +859,7 @@ if __name__ == '__main__':
                 mqtt_requester.closePort()
             print('done')
         elif options.command == 'respond':
-            # ToDO: read from a config file, so that support mutiple bindings
-            del config_dict['MQTTReplicate']['Responder']
-            config_dict['MQTTReplicate']['Responder'] = {
-                'host': options.host,
-                options.instance_name: {
-                    'database': {
-                        'data_binding': options.data_binding,
-                    }
-                },
-            }
+            del config_dict['MQTTReplicate']['Responder']['enable']
             engine = weewx.engine.DummyEngine(config_dict)
             mqtt_responder = MQTTResponder(engine, config_dict)
             try:
