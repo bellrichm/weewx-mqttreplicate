@@ -572,8 +572,11 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
                 self.data_bindings[data_binding_key]['type'] = binding.get('type', 'secondary')
                 self.data_bindings[data_binding_key]['manager_dict'] = \
                     weewx.manager.get_manager_dict_from_config(config_dict, secondary_name)
-                db_manager = engine.db_binder.get_manager(data_binding=secondary_name,
-                                                          initialize=False)
+                # 5/1/2024 - The DBBinder is instantiated after the driver
+                #db_manager = engine.db_binder.get_manager(data_binding=secondary_name,
+                #                                          initialize=False)
+                db_manager = \
+                    weewx.manager.open_manager(self.data_bindings[data_binding_key]['manager_dict'])
                 self.data_bindings[data_binding_key]['last_good_timestamp'] = \
                     db_manager.lastGoodStamp()
                 self.data_bindings[data_binding_key]['dbmanager'] = None
