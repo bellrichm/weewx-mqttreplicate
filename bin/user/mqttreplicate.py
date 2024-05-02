@@ -563,28 +563,26 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
         self.data_bindings = {}
 
         for instance_name in stn_dict.sections:
-            for database_name in stn_dict[instance_name]:
-                _primary_data_binding = \
-                    stn_dict[instance_name][database_name]['primary_data_binding']
-                _secondary_data_binding = \
-                    stn_dict[instance_name][database_name]['secondary_data_binding']
-                _data_binding = f'{instance_name}/{_primary_data_binding}'
-                self.data_bindings[_data_binding] = {}
-                self.data_bindings[_data_binding]['request_topic'] = \
-                    f'{request_topic}/{instance_name}'
-                self.data_bindings[_data_binding]['type'] = \
-                    stn_dict[instance_name][database_name].get('type', 'secondary')
-                self.data_bindings[_data_binding]['manager_dict'] = \
-                    weewx.manager.get_manager_dict_from_config(config_dict, _secondary_data_binding)
-                db_manager = engine.db_binder.get_manager(data_binding=_secondary_data_binding,
+            for  primary_name, binding in stn_dict[instance_name].items():
+                secondary_name = binding['secondary_data_binding']
+                data_binding_key = f'{instance_name}/{primary_name}'
+                self.data_bindings[data_binding_key] = {}
+                self.data_bindings[data_binding_key]['request_topic'] = (f'{request_topic}/'
+                                                                        f'{instance_name}')
+                self.data_bindings[data_binding_key]['type'] = binding.get('type', 'secondary')
+                self.data_bindings[data_binding_key]['manager_dict'] = \
+                    weewx.manager.get_manager_dict_from_config(config_dict, secondary_name)
+                db_manager = engine.db_binder.get_manager(data_binding=secondary_name,
                                                           initialize=False)
-                self.data_bindings[_data_binding]['last_good_timestamp'] = \
+                self.data_bindings[data_binding_key]['last_good_timestamp'] = \
                     db_manager.lastGoodStamp()
-                self.data_bindings[_data_binding]['dbmanager'] = None
-                if self.data_bindings[_data_binding]['type'] == 'main':
-                    self.main_data_binding = _data_binding
+                self.data_bindings[data_binding_key]['dbmanager'] = None
+                if self.data_bindings[data_binding_key]['type'] == 'main':
+                    self.main_data_binding = data_binding_key
 
         if stn_dict.get('command_line'):
+            self.data_bindings[self.main_data_binding]['type'] = 'secondary'
+            self.main_data_binding = None
             instance_name = stn_dict.sections[0]
             database_name = stn_dict[instance_name].sections[0]
             timestamp = stn_dict[instance_name][database_name].get('timestamp')
@@ -788,19 +786,6 @@ if __name__ == '__main__':
         subparser.add_argument('--timestamp',
                                type=int,
                                help='The timestamp to replicate from.')
-        subparser.add_argument('--host',
-                               default='localhost',
-                               required=True,
-                               help='The MQTT broker.')
-        subparser.add_argument('--instance-name',
-                               required=True,
-                               help='The instance.')
-        subparser.add_argument('--primary-binding',
-                               required=True,
-                               help='The primarary data binding.')
-        subparser.add_argument('--secondary-binding',
-                               required=True,
-                               help='The secondary data binding.')
 
         return subparser
 
@@ -838,18 +823,7 @@ if __name__ == '__main__':
         config_dict['Engine']['Services'] = {}
 
         if options.command == 'request':
-            del config_dict['MQTTReplicate']['Requester']
-            config_dict['MQTTReplicate']['Requester'] = {
-                'command_line': True,
-                'host': options.host,
-                options.instance_name: {
-                    'database': {
-                        'primary_data_binding': options.primary_binding,
-                        'secondary_data_binding': options.secondary_binding,
-                        'timestamp': int(options.timestamp) if options.timestamp else None,
-                    }
-                },
-            }
+            config_dict['MQTTReplicate']['Requester']['command_line'] = True
             engine = weewx.engine.DummyEngine(config_dict)
             mqtt_requester = MQTTRequester(config_dict, engine)
             try:
