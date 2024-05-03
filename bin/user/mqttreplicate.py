@@ -33,7 +33,14 @@ RESPONSE_TOPIC = 'replicate/response'
 ARCHIVE_TOPIC = 'replicate/archive'
 
 responder_threads = {}
-def init_responder_threads(logger, delta, config_dict, log_mqtt, host, port, keepalive, qos):
+def init_responder_threads(logger,
+                           delta,
+                           config_dict,
+                           log_mqtt,
+                           host,
+                           port,
+                           keepalive,
+                           publish_qos):
     ''' Initialize the threads in the pool. '''
     logger.logdbg(f"Initializing {threading.current_thread().native_id}")
     responder_threads[threading.current_thread().native_id] = MQTTResponderThread(logger,
@@ -43,7 +50,7 @@ def init_responder_threads(logger, delta, config_dict, log_mqtt, host, port, kee
                                                                                   host,
                                                                                   port,
                                                                                   keepalive,
-                                                                                  qos)
+                                                                                  publish_qos)
 
 def thread_publisher(data):
     ''' Use a thread to publish the data. '''
@@ -298,7 +305,8 @@ class MQTTResponder(weewx.engine.StdService):
         host = service_dict.get('host', 'localhost')
         port = service_dict.get('port', 1883)
         keepalive = service_dict.get('keepalive', 60)
-        self.qos = to_int(service_dict.get('qos', 0))
+        self.subscribe_qos = to_int(service_dict.get('subscribe_qos', 0))
+        self.publish_qos = to_int(service_dict.get('publish_qos', 0))
         max_responder_threads = service_dict.get('max_responder_threads', 1)
 
         self.data_bindings = {}
@@ -333,7 +341,7 @@ class MQTTResponder(weewx.engine.StdService):
                                                      host,
                                                      port,
                                                      keepalive,
-                                                     self.qos))
+                                                     self.publish_qos))
 
         self.mqtt_client = MQTTClient.get_client(self.logger, self.client_id, None)
 
@@ -369,14 +377,14 @@ class MQTTResponder(weewx.engine.StdService):
             record = data_binding['dbmanager'].getRecord(timestamp,max_delta=data_binding['delta'])
             if record:
                 payload = json.dumps(record)
-                self.publish_payload(data_binding_name, self.qos, payload)
+                self.publish_payload(data_binding_name, self.publish_qos, payload)
             else:
                 self.logger.loginf((f'Client {self.client_id}'
                                     f' binding {data_binding_name}'
                                     f' timestamp {timestamp} no record.'))
 
         payload = json.dumps(event.record)
-        self.publish_payload(self.main_data_binding, self.qos, payload)
+        self.publish_payload(self.main_data_binding, self.publish_qos, payload)
 
     def publish_payload(self, data_binding_name, qos, payload):
         ''' Publish the record. '''
@@ -397,7 +405,7 @@ class MQTTResponder(weewx.engine.StdService):
                             f" {mqtt_message_info.mid} {qos} {self.archive_topic}"))
 
     def _on_connect(self, _userdata):
-        (result, mid) = self.mqtt_client.subscribe(self.request_topic, self.qos)
+        (result, mid) = self.mqtt_client.subscribe(self.request_topic, self.subscribe_qos)
         self.logger.loginf((f"Client {self.client_id}"
                             f" subscribing to {self.request_topic}"
                             f" has a mid {int(mid)}"
@@ -463,13 +471,13 @@ class MQTTResponder(weewx.engine.StdService):
 
 class MQTTResponderThread():
     '''  Publish the requested data. '''
-    def __init__(self, logger, delta, config_dict, log_mqtt,  host, port, keepalive, qos):
+    def __init__(self, logger, delta, config_dict, log_mqtt,  host, port, keepalive, publish_qos):
         self.logger = logger
         self.config_dict = config_dict
         self.host = host
         self.port = port
         self.keepalive = keepalive
-        self.qos = qos
+        self.publish_qos = publish_qos
         self.client_id = 'MQTTReplicateRespondThread-' + str(random.randint(1000, 9999))
         self.data_bindings = {}
 
@@ -517,12 +525,12 @@ class MQTTResponderThread():
                                     f' publishing is: {payload}.'))
                 mqtt_message_info = self.mqtt_client.publish(data['topic'],
                                                              payload,
-                                                             self.qos,
+                                                             self.publish_qos,
                                                              False,
                                                              properties=data['properties'])
                 mqtt_message_info.wait_for_publish()
                 self.logger.logdbg((f"Client {self.client_id} {data['topic']}"
-                                    f"  published {mqtt_message_info.mid} {self.qos}"))
+                                    f"  published {mqtt_message_info.mid} {self.publish_qos}"))
 
             self.logger.loginf((f"Client {self.client_id} {data['topic']} {data['properties']}"
                                 f"  published {record_count} records."))                            
@@ -557,7 +565,8 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
         self.startup_wait_before_retry = float(stn_dict.get('startup_wait_before_retry', 10))
         self.archive_max_tries = float(stn_dict.get('archive_max_tries', 2))
         self.archive_wait_before_retry = float(stn_dict.get('archive_wait_before_retry', 10))
-        self.qos = to_int(stn_dict.get('qos', 0))
+        self.subscribe_qos = to_int(stn_dict.get('subscribe_qos', 0))
+        self.publish_qos = to_int(stn_dict.get('publish_qos', 0))
         self.archive_topic = stn_dict.get('archive_topic', ARCHIVE_TOPIC)
 
         self.client_id = 'MQTTReplicateRequest-' + str(random.randint(1000, 9999))
@@ -635,14 +644,14 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
             if data_binding['type'] == 'main':
                 continue
             self.request_records(data_binding_name,
-                                 self.qos,
+                                 self.publish_qos,
                                  data_binding['request_topic'],
                                  data_binding['last_good_timestamp'])
 
         if self.main_data_binding:
             # Request 'main' last, so new_archive_record event fired after other DBs are updated
             self.request_records(self.main_data_binding,
-                                self.qos,
+                                self.publish_qos,
                                 self.data_bindings[self.main_data_binding]['request_topic'],
                                 self.data_bindings[self.main_data_binding]['last_good_timestamp'])
 
@@ -720,14 +729,14 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
                             f" {mqtt_message_info.mid} {qos}"))
 
     def _on_connect(self, _userdata):
-        (result, mid) = self.mqtt_client.subscribe(self.response_topic, self.qos)
+        (result, mid) = self.mqtt_client.subscribe(self.response_topic, self.subscribe_qos)
         self.logger.loginf((f"Client {self.client_id}"
                          f" subscribing to {self.response_topic}"
                          f" has a mid {int(mid)}"
                          f" and rc {int(result)}"))
         self.response_topic_mid = mid
 
-        (result, mid) = self.mqtt_client.subscribe(self.archive_topic, self.qos)
+        (result, mid) = self.mqtt_client.subscribe(self.archive_topic, self.subscribe_qos)
         self.logger.loginf((f"Client {self.client_id}"
                          f" subscribing to {self.archive_topic}"
                          f" has a mid {int(mid)}"
