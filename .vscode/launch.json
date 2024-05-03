@@ -15,10 +15,6 @@
                 "request",
                 "--conf",  "~/weewx-data/run/weewx.conf",
                 //"--timestamp", "1714480200",
-                "--host", "weather-data.local",
-                "--instance-name", "weather",
-                "--primary-binding", "wx_binding",
-                "--secondary-binding", "secondarydb_binding",
             ]
         },        
         {
@@ -31,9 +27,6 @@
             "args": [
                 "respond",
                 "--conf",  "~/weewx-data/run/weewx.conf",
-                "--host", "weather-data.local",
-                "--instance-name", "weather",
-                "--data-binding", "wx_binding",
             ]
         },
         {
