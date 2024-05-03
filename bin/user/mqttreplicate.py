@@ -305,8 +305,8 @@ class MQTTResponder(weewx.engine.StdService):
         host = service_dict.get('host', 'localhost')
         port = service_dict.get('port', 1883)
         keepalive = service_dict.get('keepalive', 60)
-        self.subscribe_qos = to_int(service_dict.get('subscribe_qos', 0))
-        self.publish_qos = to_int(service_dict.get('publish_qos', 0))
+        self.subscribe_qos = to_int(service_dict.get('subscribe_qos', 1))
+        self.publish_qos = to_int(service_dict.get('publish_qos', 1))
         max_responder_threads = service_dict.get('max_responder_threads', 1)
 
         self.data_bindings = {}
@@ -565,8 +565,8 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
         self.startup_wait_before_retry = float(stn_dict.get('startup_wait_before_retry', 10))
         self.archive_max_tries = float(stn_dict.get('archive_max_tries', 2))
         self.archive_wait_before_retry = float(stn_dict.get('archive_wait_before_retry', 10))
-        self.subscribe_qos = to_int(stn_dict.get('subscribe_qos', 0))
-        self.publish_qos = to_int(stn_dict.get('publish_qos', 0))
+        self.subscribe_qos = to_int(stn_dict.get('subscribe_qos', 1))
+        self.publish_qos = to_int(stn_dict.get('publish_qos', 1))
         self.archive_topic = stn_dict.get('archive_topic', ARCHIVE_TOPIC)
 
         self.client_id = 'MQTTReplicateRequest-' + str(random.randint(1000, 9999))
