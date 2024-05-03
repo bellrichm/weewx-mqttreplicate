@@ -274,8 +274,7 @@ class MQTTClientV2(MQTTClient):
 
     def _client_on_publish(self, _client, userdata, mid, _reason_codes, _properties):
         """ The on_publish callback. """
-        self.logger.logdbg(f"Client {self.client_id} published  ({int(time.time())}): {mid}")
-        self._on_publish(userdata)
+        self._on_publish(userdata, mid)
 
     def _client_on_subscribe(self, _client, userdata, mid, _reason_code_list, _properties):
         self._on_subscribe(userdata, mid)
@@ -502,11 +501,13 @@ class MQTTResponderThread():
             paho.mqtt.client.MQTT_LOG_DEBUG: self.logger.loginf
         }
 
+        self.mids = {}
         self.mqtt_client = MQTTClient.get_client(self.logger, self.client_id, None)
 
         self.mqtt_client.on_connect = self._on_connect
         if log_mqtt:
             self.mqtt_client.on_log = self._on_log
+        self.mqtt_client.on_publish = self._on_publish
 
     def run(self, data):
         ''' Publish the data. '''
@@ -528,12 +529,22 @@ class MQTTResponderThread():
                                                              self.publish_qos,
                                                              False,
                                                              properties=data['properties'])
-                mqtt_message_info.wait_for_publish()
                 self.logger.logdbg((f"Client {self.client_id} {data['topic']}"
                                     f"  published {mqtt_message_info.mid} {self.publish_qos}"))
+                self.mids[mqtt_message_info.mid] = {}
+                self.mids[mqtt_message_info.mid]['time_stamp'] = time.time()
+                self.mids[mqtt_message_info.mid]['qos'] = self.publish_qos
 
             self.logger.loginf((f"Client {self.client_id} {data['topic']} {data['properties']}"
-                                f"  published {record_count} records."))                            
+                                f"  published {record_count} records."))
+            wait_count = 5
+            counter = 0
+            sleepy = 2
+            while len(self.mids) > 0 and counter < wait_count:
+                self.logger.logdbg(self.publish_type, "() %s in flight messages; on %s loop count %s" %(len(self.mids), counter, self.mids))
+                self.mqtt_client.loop(timeout=0.1)
+                time.sleep(sleepy)
+                counter += 1                            
             self.mqtt_client.disconnect()
         except Exception as exception: # (want to catch all) pylint: disable=broad-exception-caught
             self.logger.logerr(f"Failed {threading.current_thread().native_id}"
@@ -544,6 +555,14 @@ class MQTTResponderThread():
     def _on_connect(self, _userdata):
         pass
 
+    def _on_publish(self, _userdata, mid):
+        if mid in self.mids:
+            time_stamp = self.mids[mid]['time_stamp']
+            qos = self.mids[mid]['qos']
+            del self.mids[mid]
+        self.logger.logdbg("Published  (%s): %s %s %s" % (int(time.time()), time_stamp, mid, qos))
+        self.logger.logdbg("Inflight   (%s): %s" % (int(time.time()), self.mids))
+        
     def _on_log(self, _client, _userdata, level, msg):
         self.mqtt_logger[level](f"Client {self.client_id} MQTT log: {msg}")
 
