@@ -551,7 +551,10 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
         self.the_time = time.time()
         self.loop_interval = float(stn_dict.get('loop_interval', 2.5))
         self._archive_interval = to_int(stn_dict.get('archive_interval', 300))
-        self.wait_before_retry = float(stn_dict.get('wait_before_retry', 10))
+        self.startup_max_tries = float(stn_dict.get('startup_max_tries', 2))
+        self.startup_wait_before_retry = float(stn_dict.get('startup_wait_before_retry', 10))
+        self.archive_max_tries = float(stn_dict.get('archive_max_tries', 2))
+        self.archive_wait_before_retry = float(stn_dict.get('archive_wait_before_retry', 10))
         self.archive_topic = stn_dict.get('archive_topic', ARCHIVE_TOPIC)
 
         self.client_id = 'MQTTReplicateRequest-' + str(random.randint(1000, 9999))
@@ -652,20 +655,32 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
         return self._archive_interval
 
     def genStartupRecords(self, _lastgood_ts):
-        while True:
-            try:
-                # ToDo: needs rework
-                yield self.data_queue.get(True ,self.wait_before_retry)[1]
-            except queue.Empty:
-                break
+        for record in self.gen_replica_record(self.startup_max_tries,
+                                              self.startup_wait_before_retry):
+            yield record
 
     def genArchiveRecords(self, _lastgood_ts):
+        for record in self.gen_replica_record(self.archive_max_tries,
+                                              self.archive_wait_before_retry):
+            yield record
+
+    def gen_replica_record(self, max_tries, wait_before_retry):
+        ''' Generator to return the records that are in the queue. '''
+        record_count = 0
+        tries = 0
         while True:
             try:
-                # ToDo: needs rework
-                yield self.data_queue.get(True ,self.wait_before_retry)[1]
+                record = self.data_queue.get(True, wait_before_retry)[1]
+                record_count += 1
+                tries = 0
+                yield record
             except queue.Empty:
-                break
+                tries += 1
+                if tries >= max_tries:
+                    self.logger.loginf((f"Client {self.client_id}:"
+                                        f" After {tries} with a wait of {wait_before_retry},"
+                                        " queue is still empty."))
+                    break
 
     def genLoopPackets(self):
         while True:
