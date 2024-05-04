@@ -93,13 +93,13 @@ class MQTTClient(abc.ABC):
         ''' Connect to the MQTT server. '''
         raise NotImplementedError("Method 'disconnect' is not implemented")
 
+    def loop_forever(self):
+        ''' Connect to the MQTT server. '''
+        raise NotImplementedError("Method 'loop_forever' is not implemented")
+
     def loop_start(self):
         ''' Connect to the MQTT server. '''
         raise NotImplementedError("Method 'loop_start' is not implemented")
-
-    def loop(self):
-        ''' Connect to the MQTT server. '''
-        raise NotImplementedError("Method 'loop' is not implemented")
 
     def loop_stop(self):
         ''' Connect to the MQTT server. '''
@@ -233,8 +233,8 @@ class MQTTClientV2(MQTTClient):
     def disconnect(self):
         self.client.disconnect()
 
-    def loop(self):
-        self.client.loop()
+    def loop_forever(self):
+        self.client.loop_forever()
 
     def loop_start(self):
         self.client.loop_start()
@@ -537,15 +537,8 @@ class MQTTResponderThread():
 
             self.logger.loginf((f"Client {self.client_id} {data['topic']} {data['properties']}"
                                 f"  published {record_count} records."))
-            wait_count = 5
-            counter = 0
-            sleepy = 2
-            while len(self.mids) > 0 and counter < wait_count:
-                self.logger.logdbg(self.publish_type, "() %s in flight messages; on %s loop count %s" %(len(self.mids), counter, self.mids))
-                self.mqtt_client.loop(timeout=0.1)
-                time.sleep(sleepy)
-                counter += 1                            
-            self.mqtt_client.disconnect()
+            self.mqtt_client.loop_forever()
+
         except Exception as exception: # (want to catch all) pylint: disable=broad-exception-caught
             self.logger.logerr(f"Failed {threading.current_thread().native_id}"
                                f" {data['data_binding']}"
@@ -560,9 +553,14 @@ class MQTTResponderThread():
             time_stamp = self.mids[mid]['time_stamp']
             qos = self.mids[mid]['qos']
             del self.mids[mid]
-        self.logger.logdbg("Published  (%s): %s %s %s" % (int(time.time()), time_stamp, mid, qos))
-        self.logger.logdbg("Inflight   (%s): %s" % (int(time.time()), self.mids))
-        
+        if len(self.mids) > 0:
+            self.logger.logdbg((f"Client {self.client_id}:"
+                                f" Published (int(time.time())): {time_stamp} {mid} {qos}"))
+            self.logger.logdbg((f"Client {self.client_id}:"
+                                f" Inflight ({int(time.time())}): {self.mids}"))
+        else:
+            self.mqtt_client.disconnect()
+
     def _on_log(self, _client, _userdata, level, msg):
         self.mqtt_logger[level](f"Client {self.client_id} MQTT log: {msg}")
 
