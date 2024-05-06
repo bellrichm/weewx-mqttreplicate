@@ -8,9 +8,6 @@ import queue
 import random
 import threading
 import time
-import traceback
-
-from concurrent.futures import ThreadPoolExecutor
 
 import paho
 import paho.mqtt
@@ -31,32 +28,6 @@ DRIVER_VERSION = VERSION
 REQUEST_TOPIC = 'replicate/request'
 RESPONSE_TOPIC = 'replicate/response'
 ARCHIVE_TOPIC = 'replicate/archive'
-
-responder_threads = {}
-def init_responder_threads(logger,
-                           delta,
-                           config_dict,
-                           log_mqtt,
-                           host,
-                           port,
-                           keepalive,
-                           publish_qos):
-    ''' Initialize the threads in the pool. '''
-    logger.logdbg(f"Initializing {threading.current_thread().native_id}")
-    responder_threads[threading.current_thread().native_id] = MQTTResponderThread(logger,
-                                                                                  delta,
-                                                                                  config_dict,
-                                                                                  log_mqtt,
-                                                                                  host,
-                                                                                  port,
-                                                                                  keepalive,
-                                                                                  publish_qos)
-
-def thread_publisher(data):
-    ''' Use a thread to publish the data. '''
-    responder_threads[threading.current_thread().native_id]\
-        .logger.logdbg(f"Calling {threading.current_thread().native_id} with {data}.")
-    responder_threads[threading.current_thread().native_id].run(data)
 
 class Logger():
     ''' Manage the logging '''
@@ -306,7 +277,7 @@ class MQTTResponder(weewx.engine.StdService):
         keepalive = service_dict.get('keepalive', 60)
         self.subscribe_qos = to_int(service_dict.get('subscribe_qos', 1))
         self.publish_qos = to_int(service_dict.get('publish_qos', 1))
-        max_responder_threads = service_dict.get('max_responder_threads', 1)
+        self.max_responder_threads = service_dict.get('max_responder_threads', 1)
 
         self.data_bindings = {}
         for data_binding_name, data_binding in service_dict[instance_name].items():
@@ -331,16 +302,20 @@ class MQTTResponder(weewx.engine.StdService):
 
         self.bind(weewx.NEW_ARCHIVE_RECORD, self.new_archive_record)
 
-        self.executor = ThreadPoolExecutor(max_workers=max_responder_threads,
-                                           initializer=init_responder_threads,
-                                           initargs=(self.logger,
-                                                     delta,
-                                                     config_dict,
-                                                     False,
-                                                     host,
-                                                     port,
-                                                     keepalive,
-                                                     self.publish_qos))
+        self.data_queue = queue.Queue()
+        self.threads = []
+        for _i in range(self.max_responder_threads):
+            thread = MQTTResponderThread(self.logger,
+                                         self.data_queue,
+                                         delta,
+                                         config_dict,
+                                         False,
+                                         host,
+                                         port,
+                                         keepalive,
+                                         self.publish_qos)
+            thread.start()
+            self.threads.append(thread)
 
         self.mqtt_client = MQTTClient.get_client(self.logger, self.client_id, None)
 
@@ -360,10 +335,11 @@ class MQTTResponder(weewx.engine.StdService):
         self.mqtt_client.disconnect()
         self.mqtt_client.loop_stop()
 
-        # Hopefully this will release any resources a thread aquired, such as db connections
-        # Note, it probably does not matter much because if the pool is being shut down
-        # WeeWX is probably going down
-        self.executor.shutdown()
+        for i in range(self.max_responder_threads):
+            self.data_queue.put(None)
+
+        for i in range(self.max_responder_threads):
+            self.threads[i].join()
 
     def new_archive_record(self, event):
         ''' Handle the new_archive_record event.'''
@@ -463,15 +439,26 @@ class MQTTResponder(weewx.engine.StdService):
         data = {'topic': response_topic,
                 'start_timestamp': start_timestamp,
                 'data_binding': data_binding,
-                'properties': properties}               
-        self.executor.submit(thread_publisher, data)
+                'properties': properties}
+        self.data_queue.put(data)
         self.logger.logdbg(f'Client {self.client_id} submitted:'
                            f' {data_binding} {response_topic} queued: {data}')
 
-class MQTTResponderThread():
+class MQTTResponderThread(threading.Thread):
     '''  Publish the requested data. '''
-    def __init__(self, logger, delta, config_dict, log_mqtt,  host, port, keepalive, publish_qos):
+    def __init__(self,
+                 logger,
+                 data_queue,
+                 delta,
+                 config_dict,
+                 log_mqtt,
+                 host,
+                 port,
+                 keepalive,
+                 publish_qos):
+        threading.Thread.__init__(self)
         self.logger = logger
+        self.data_queue = data_queue
         self.config_dict = config_dict
         self.host = host
         self.port = port
@@ -488,10 +475,8 @@ class MQTTResponderThread():
             self.data_bindings[data_binding_key] = {}
             self.data_bindings[data_binding_key]['delta'] = data_binding.get('delta', delta)
             self.data_bindings[data_binding_key]['type'] = data_binding.get('type', 'secondary')
-            manager_dict = weewx.manager.get_manager_dict_from_config(config_dict,
-                                                                      data_binding_name)
-            self.data_bindings[data_binding_key]['dbmanager'] = \
-                weewx.manager.open_manager(manager_dict)
+            self.data_bindings[data_binding_key]['manager_dict'] = \
+                weewx.manager.get_manager_dict_from_config(config_dict, data_binding_name)
 
         self.mqtt_logger = {
             paho.mqtt.client.MQTT_LOG_INFO: self.logger.loginf,
@@ -509,41 +494,47 @@ class MQTTResponderThread():
             self.mqtt_client.on_log = self._on_log
         self.mqtt_client.on_publish = self._on_publish
 
-    def run(self, data):
+    def run(self):
         ''' Publish the data. '''
-        try:
-            self.logger.logdbg(f"In MQTTResponderThread.run data: {data}")
+        for _data_binding_key, data_binding in self.data_bindings.items():
+            data_binding['dbmanager'] = weewx.manager.open_manager(data_binding['manager_dict'])
 
-            self.mqtt_client.connect(self.host, self.port, self.keepalive)
+        while True:
+            data = self.data_queue.get()
+            if data:
+                self.logger.logdbg(f"In MQTTResponderThread.run data: {data}")
 
-            record_count = 0
-            for record in self.data_bindings[data['data_binding']]['dbmanager']\
-                                                .genBatchRecords(data['start_timestamp']):
-                record_count += 1
-                payload = json.dumps(record)
-                self.logger.logdbg((f'Client {self.client_id} {data["topic"]}'
-                                    f' {data["data_binding"]}'
-                                    f' publishing is: {payload}.'))
-                mqtt_message_info = self.mqtt_client.publish(data['topic'],
-                                                             payload,
-                                                             self.publish_qos,
-                                                             False,
-                                                             properties=data['properties'])
-                self.logger.logdbg((f"Client {self.client_id} {data['topic']}"
-                                    f"  published {mqtt_message_info.mid} {self.publish_qos}"))
-                self.mids[mqtt_message_info.mid] = {}
-                self.mids[mqtt_message_info.mid]['time_stamp'] = time.time()
-                self.mids[mqtt_message_info.mid]['qos'] = self.publish_qos
+                self.mqtt_client.connect(self.host, self.port, self.keepalive)
 
-            self.logger.loginf((f"Client {self.client_id} {data['topic']} {data['properties']}"
-                                f"  published {record_count} records."))
-            self.mqtt_client.loop_forever()
+                record_count = 0
+                for record in self.data_bindings[data['data_binding']]['dbmanager']\
+                                                    .genBatchRecords(data['start_timestamp']):
+                    record_count += 1
+                    payload = json.dumps(record)
+                    self.logger.logdbg((f'Client {self.client_id} {data["topic"]}'
+                                        f' {data["data_binding"]}'
+                                        f' publishing is: {payload}.'))
+                    mqtt_message_info = self.mqtt_client.publish(data['topic'],
+                                                                 payload,
+                                                                 self.publish_qos,
+                                                                 False,
+                                                                 properties=data['properties'])
+                    self.logger.logdbg((f"Client {self.client_id} {data['topic']}"
+                                        f"  published {mqtt_message_info.mid} {self.publish_qos}"))
+                    self.mids[mqtt_message_info.mid] = {}
+                    self.mids[mqtt_message_info.mid]['time_stamp'] = time.time()
+                    self.mids[mqtt_message_info.mid]['qos'] = self.publish_qos
 
-        except Exception as exception: # (want to catch all) pylint: disable=broad-exception-caught
-            self.logger.logerr(f"Failed {threading.current_thread().native_id}"
-                               f" {data['data_binding']}"
-                               f" with {type(exception)} and reason {exception}.")
-            self.logger.logerr(f"{traceback.format_exc()}")
+                self.logger.loginf((f"Client {self.client_id} {data['topic']} {data['properties']}"
+                                    f"  published {record_count} records."))
+                # Wait for all messages to be published
+                if len(self.mids) > 0:
+                    self.mqtt_client.loop_forever()
+            else:
+                break
+
+        for _data_binding_key, data_binding in self.data_bindings.items():
+            data_binding['dbmanager'].close()
 
     def _on_connect(self, _userdata):
         pass
