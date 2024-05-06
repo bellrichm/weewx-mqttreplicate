@@ -8,6 +8,7 @@ import queue
 import random
 import threading
 import time
+import traceback
 
 import paho
 import paho.mqtt
@@ -434,7 +435,7 @@ class MQTTResponder(weewx.engine.StdService):
             ('data_binding', data_binding)
             ]
 
-        start_timestamp = int(msg.payload.decode('utf-8'))
+        start_timestamp = int(msg.payload.decode('utf-8')) - 6000 # ToDo:
 
         data = {'topic': response_topic,
                 'start_timestamp': start_timestamp,
@@ -765,44 +766,50 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
         self.mqtt_logger[level](f"Client {self.client_id} MQTT log: {msg}")
 
     def _on_message(self, _userdata, msg):
-        self.logger.logdbg((f"Client {self.client_id}:"
-                            f" topic: {msg.topic},"
-                            f" QOS: {int(msg.qos)},"
-                            f" retain: {msg.retain},"
-                            f" payload: {msg.payload},"
-                            f" properties: {msg.properties}"))
+        # ToDo: Fine tune exception handling
+        try:
+            self.logger.logdbg((f"Client {self.client_id}:"
+                                f" topic: {msg.topic},"
+                                f" QOS: {int(msg.qos)},"
+                                f" retain: {msg.retain},"
+                                f" payload: {msg.payload},"
+                                f" properties: {msg.properties}"))
 
-        if not hasattr(msg.properties,'UserProperty'):
-            self.logger.logerr(f'Client {self.client_id} has no "UserProperty"')
-            self.logger.logerr(f'Client {self.client_id}'
-                               f' skipping topic: {msg.topic} payload: {msg.payload}')
-            return
+            if not hasattr(msg.properties,'UserProperty'):
+                self.logger.logerr(f'Client {self.client_id} has no "UserProperty"')
+                self.logger.logerr(f'Client {self.client_id}'
+                                   f' skipping topic: {msg.topic} payload: {msg.payload}')
+                return
 
-        user_property = msg.properties.UserProperty
-        data_binding = None
-        for keyword_value in user_property:
-            if keyword_value[0] == 'data_binding':
-                data_binding = keyword_value[1]
-                break
+            user_property = msg.properties.UserProperty
+            data_binding = None
+            for keyword_value in user_property:
+                if keyword_value[0] == 'data_binding':
+                    data_binding = keyword_value[1]
+                    break
 
-        if not data_binding:
-            self.logger.logerr(f'Client {self.client_id} has no "data_binding" UserProperty')
-            self.logger.logerr(f'Client {self.client_id}'
-                               f' skipping topic: {msg.topic} payload: {msg.payload}')
-            return
+            if not data_binding:
+                self.logger.logerr(f'Client {self.client_id} has no "data_binding" UserProperty')
+                self.logger.logerr(f'Client {self.client_id}'
+                                   f' skipping topic: {msg.topic} payload: {msg.payload}')
+                return
 
-        if data_binding not in self.data_bindings:
-            self.logger.logerr(f'Client {self.client_id} has unknown data_binding {data_binding}')
-            self.logger.logerr(f'Client {self.client_id}'
-                               f' skipping topic: {msg.topic} payload: {msg.payload}')
-            return
+            if data_binding not in self.data_bindings:
+                self.logger.logerr((f'Client {self.client_id}'
+                                    f' has unknown data_binding {data_binding}'))
+                self.logger.logerr(f'Client {self.client_id}'
+                                   f' skipping topic: {msg.topic} payload: {msg.payload}')
+                return
 
-        record = json.loads(msg.payload.decode('utf-8'))
-        if self.data_bindings[data_binding]['type'] == 'main':
-            # For all records from the 'main' db, create an archive_record
-            self.data_queue.put((record['dateTime'], record))
-        else:
-            self.data_bindings[data_binding]['dbmanager'].addRecord(record)
+            record = json.loads(msg.payload.decode('utf-8'))
+            if self.data_bindings[data_binding]['type'] == 'main':
+                # For all records from the 'main' db, create an archive_record
+                self.data_queue.put((record['dateTime'], record))
+            else:
+                self.data_bindings[data_binding]['dbmanager'].addRecord(record)
+        except Exception as exception: # (want to catch all ) pylint: disable=broad-exception-caught
+            self.logger.logerr(f"Failed with {type(exception)} and reason {exception}.")
+            self.logger.logerr(f"{traceback.format_exc()}")
 
     def _on_subscribe(self, _userdata, mid):
         if mid == self.response_topic_mid:
