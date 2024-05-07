@@ -30,6 +30,9 @@ REQUEST_TOPIC = 'replicate/request'
 RESPONSE_TOPIC = 'replicate/response'
 ARCHIVE_TOPIC = 'replicate/archive'
 
+class ThreadError(Exception):
+    ''' Exception raised when a critical error occurs in a child thread. '''
+
 class Logger():
     ''' Manage the logging '''
     def __init__(self):
@@ -435,7 +438,7 @@ class MQTTResponder(weewx.engine.StdService):
             ('data_binding', data_binding)
             ]
 
-        start_timestamp = int(msg.payload.decode('utf-8')) - 6000 # ToDo:
+        start_timestamp = int(msg.payload.decode('utf-8'))
 
         data = {'topic': response_topic,
                 'start_timestamp': start_timestamp,
@@ -624,6 +627,8 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
             paho.mqtt.client.MQTT_LOG_DEBUG: self.logger.loginf
         }
 
+        self.exception = None
+
         self.mqtt_client = MQTTClient.get_client(self.logger, self.client_id, None)
 
         self.mqtt_client.on_connect = self._on_connect
@@ -704,6 +709,8 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
 
     def genLoopPackets(self):
         while True:
+            if self.exception:
+                raise ThreadError from self.exception
             sleep_time = self.the_time + self.loop_interval - time.time()
             if sleep_time > 0:
                 time.sleep(sleep_time)
@@ -810,6 +817,7 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
         except Exception as exception: # (want to catch all ) pylint: disable=broad-exception-caught
             self.logger.logerr(f"Failed with {type(exception)} and reason {exception}.")
             self.logger.logerr(f"{traceback.format_exc()}")
+            self.exception = exception
 
     def _on_subscribe(self, _userdata, mid):
         if mid == self.response_topic_mid:
@@ -871,9 +879,9 @@ if __name__ == '__main__':
             engine = weewx.engine.DummyEngine(config_dict)
             mqtt_requester = MQTTRequester(config_dict, engine)
             try:
-                while True:
-                    time.sleep(2)
-            except KeyboardInterrupt:
+                for _packet in mqtt_requester.genLoopPackets():
+                    pass
+            except (KeyboardInterrupt, Exception): # pylint: disable=broad-exception-caught
                 mqtt_requester.closePort()
             print('done')
         elif options.command == 'respond':
