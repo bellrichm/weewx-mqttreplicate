@@ -591,6 +591,10 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
         self.subscribe_qos = to_int(stn_dict.get('subscribe_qos', 1))
         self.publish_qos = to_int(stn_dict.get('publish_qos', 1))
         self.archive_topic = stn_dict.get('archive_topic', ARCHIVE_TOPIC)
+        host = stn_dict.get('host', 'localhost')
+        port = stn_dict.get('port', 1883)
+        keepalive = stn_dict.get('keepalive', 60)
+        log_mqtt = stn_dict.get('log_mqtt', False)
 
         self.client_id = 'MQTTReplicateRequest-' + str(random.randint(1000, 9999))
         self.response_topic = stn_dict.get('response_topic',
@@ -630,38 +634,29 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
             if timestamp:
                 next(iter(self.data_bindings.values()))['last_good_timestamp'] = timestamp
 
-        self.mqtt_logger = {
-            paho.mqtt.client.MQTT_LOG_INFO: self.logger.loginf,
-            paho.mqtt.client.MQTT_LOG_NOTICE: self.logger.loginf,
-            paho.mqtt.client.MQTT_LOG_WARNING: self.logger.loginf,
-            paho.mqtt.client.MQTT_LOG_ERR: self.logger.loginf,
-            paho.mqtt.client.MQTT_LOG_DEBUG: self.logger.loginf
-        }
-
-        self.exception = None
+        #self.exception = None
 
         self.mqtt_client = MQTTClient.get_client(self.logger, self.client_id, None)
 
-        self.mqtt_client.on_connect = self._on_connect
-        self.mqtt_client.on_disconnect = self._on_disconnect
-        if stn_dict.get('log_mqtt', False):
-            self.mqtt_client.on_log = self._on_log
-        self.mqtt_client.on_message = self._on_message
-        self.mqtt_client.on_subscribe = self._on_subscribe
-        self.response_topic_mid = None
-        self.subscribed = False
-
-        self.mqtt_client.connect(stn_dict.get('host', 'localhost'),
-                                 stn_dict.get('port', 1883),
-                                 stn_dict.get('keepalive', 60))
-
         self.data_queue = queue.PriorityQueue()
 
-        self.mqtt_client.loop_start()
+        loop_thread = MQTTRequesterLoopThread(self.logger,
+                                              self.mqtt_client,
+                                              self.client_id,
+                                              log_mqtt,
+                                              self.data_queue,
+                                              self.data_bindings,
+                                              self.response_topic,
+                                              self.archive_topic,
+                                              self.subscribe_qos,
+                                              host,
+                                              port,
+                                              keepalive)
+        loop_thread.start()
 
         self.logger.loginf(f"Client {self.client_id}: Thread: {self.thread_id}"
                            f" Waiting for MQTT subscription.")
-        while not self.subscribed:
+        while not loop_thread.subscribed:
             time.sleep(1)
 
         # Request any possible missing records
@@ -721,8 +716,8 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
 
     def genLoopPackets(self):
         while True:
-            if self.exception:
-                raise ThreadError from self.exception
+            #if self.exception:
+            #    raise ThreadError from self.exception
             sleep_time = self.the_time + self.loop_interval - time.time()
             if sleep_time > 0:
                 time.sleep(sleep_time)
@@ -756,6 +751,54 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
                             f"  properties ({properties}):"                        
                             f" {mqtt_message_info.mid} {qos}"))
 
+class MQTTRequesterLoopThread(threading.Thread):
+    ''' The MQTT 'loop' thread. '''
+    def __init__(self,
+                 logger,
+                 mqtt_client,
+                 client_id,
+                 log_mqtt,
+                 data_queue,
+                 data_bindings,
+                 response_topic,
+                 archive_topic,
+                 subscribe_qos,
+                 host,
+                 port,
+                 keepalive):
+        threading.Thread.__init__(self)
+        self.logger = logger
+        self.mqtt_client = mqtt_client
+        self.client_id = client_id
+        self.data_queue = data_queue
+        self.data_bindings = data_bindings
+        self.response_topic = response_topic
+        self.archive_topic = archive_topic
+        self.subscribe_qos = subscribe_qos
+
+        self.response_topic_mid = None
+        self.subscribed = False
+
+        self.mqtt_logger = {
+            paho.mqtt.client.MQTT_LOG_INFO: self.logger.loginf,
+            paho.mqtt.client.MQTT_LOG_NOTICE: self.logger.loginf,
+            paho.mqtt.client.MQTT_LOG_WARNING: self.logger.loginf,
+            paho.mqtt.client.MQTT_LOG_ERR: self.logger.loginf,
+            paho.mqtt.client.MQTT_LOG_DEBUG: self.logger.loginf
+        }
+
+        self.mqtt_client.on_connect = self._on_connect
+        self.mqtt_client.on_disconnect = self._on_disconnect
+        if log_mqtt:
+            self.mqtt_client.on_log = self._on_log
+        self.mqtt_client.on_message = self._on_message
+        self.mqtt_client.on_subscribe = self._on_subscribe
+
+        self.mqtt_client.connect(host, port, keepalive)
+    def run(self):
+        self.thread_id = threading.get_native_id()
+        self.mqtt_client.loop_forever()
+
     def _on_connect(self, _userdata):
         (result, mid) = self.mqtt_client.subscribe(self.response_topic, self.subscribe_qos)
         self.logger.loginf((f"Client {self.client_id}: Thread: {self.thread_id}"
@@ -783,7 +826,8 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
                                    f" closed db {data_binding_name}.")
 
     def _on_log(self, _client, _userdata, level, msg):
-        self.mqtt_logger[level](f"Client {self.client_id} MQTT log: {msg}")
+        self.mqtt_logger[level](f"Client: {self.client_id} Thread: {self.thread_id}"
+                                f" MQTT log: {msg}")
 
     def _on_message(self, _userdata, msg):
         # ToDo: Fine tune exception handling
@@ -834,7 +878,7 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
                                 f" Failed with {type(exception)} and reason {exception}."))
             self.logger.logerr((f"Client {self.client_id}: Thread: {self.thread_id}"
                                 f" {traceback.format_exc()}"))
-            self.exception = exception
+            #self.exception = exception
 
     def _on_subscribe(self, _userdata, mid):
         if mid == self.response_topic_mid:
