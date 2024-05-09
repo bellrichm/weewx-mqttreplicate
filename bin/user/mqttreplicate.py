@@ -226,17 +226,17 @@ class MQTTClientV2(MQTTClient):
     # The  wrappers of the callbacks are next
 
     def _client_on_connect(self, _client, userdata, flags, reason_code, _properties):
-        self.logger.logdbg(f"Client {self.client_id} connected with result code {reason_code}")
-        self.logger.logdbg((f"Client {self.client_id}"
+        self.logger.logdbg(f"Client: {self.client_id} connected with result code {reason_code}")
+        self.logger.logdbg((f"Client: {self.client_id}"
                             f" connected with result code {int(reason_code.value)}"))
-        self.logger.logdbg(f"Client {self.client_id} connected flags {str(flags)}")
+        self.logger.logdbg(f"Client: {self.client_id} connected flags {str(flags)}")
         self._on_connect(userdata)
 
     def _client_on_connect_fail(self, _client, userdata):
         self._on_connect_fail(userdata)
 
     def _client_on_disconnect(self, _client, userdata, _flags, reason_code, _properties):
-        self.logger.logdbg((f"Client {self.client_id}"
+        self.logger.logdbg((f"Client: {self.client_id}"
                             f" disconnected with result code {reason_code.value}"))
         self._on_disconnect(userdata, reason_code.value)
 
@@ -259,6 +259,7 @@ class MQTTResponder(weewx.engine.StdService):
     def __init__(self, engine, config_dict):
         super().__init__(engine, config_dict)
         self.logger = Logger()
+        self.thread_id = threading.get_native_id()
 
         if not to_bool(config_dict.get('MQTTReplicate', {})\
                        .get('Responder', {})\
@@ -332,7 +333,7 @@ class MQTTResponder(weewx.engine.StdService):
         self.mqtt_client.loop_start()
 
     def shutDown(self):
-        self.logger.loginf(f'Client {self.client_id} shutting down.')
+        self.logger.loginf(f'Client: {self.client_id} thread: {self.thread_id} shutting down.')
         for _, data_binding in self.data_bindings.items():
             data_binding['dbmanager'].close()
 
@@ -358,7 +359,7 @@ class MQTTResponder(weewx.engine.StdService):
                 payload = json.dumps(record)
                 self.publish_payload(data_binding_name, self.publish_qos, payload)
             else:
-                self.logger.loginf((f'Client {self.client_id}'
+                self.logger.loginf((f'Client: {self.client_id} thread: {self.thread_id}'
                                     f' binding {data_binding_name}'
                                     f' timestamp {timestamp} no record.'))
 
@@ -371,7 +372,7 @@ class MQTTResponder(weewx.engine.StdService):
         properties.UserProperty = [
             ('data_binding', data_binding_name)
             ]
-        self.logger.logdbg((f'Client {self.client_id}'
+        self.logger.logdbg((f'Client: {self.client_id} thread: {self.thread_id}'
                             f' publishing binding: {data_binding_name},'
                             f' payload: {payload}.'))
         mqtt_message_info = self.mqtt_client.publish(self.archive_topic,
@@ -379,22 +380,23 @@ class MQTTResponder(weewx.engine.StdService):
                                                      qos,
                                                      False,
                                                      properties=properties)
-        self.logger.logdbg((f"Client {self.client_id}"
+        self.logger.logdbg((f"Client: {self.client_id} thread: {self.thread_id}"
                             f" binding {data_binding_name}"
                             f" {mqtt_message_info.mid} {qos} {self.archive_topic}"))
 
     def _on_connect(self, _userdata):
         (result, mid) = self.mqtt_client.subscribe(self.request_topic, self.subscribe_qos)
-        self.logger.loginf((f"Client {self.client_id}"
+        self.logger.loginf((f"Client: {self.client_id} thread: {self.thread_id}"
                             f" subscribing to {self.request_topic}"
                             f" has a mid {int(mid)}"
                             f" and rc {int(result)}"))
 
     def _on_log(self, _client, _userdata, level, msg):
-        self.mqtt_logger[level](f"Client {self.client_id} MQTT log: {msg}")
+        self.mqtt_logger[level](f"Client: {self.client_id} thread: {self.thread_id}"
+                                f" MQTT log: {msg}")
 
     def _on_message(self, _userdata, msg):
-        self.logger.logdbg((f"Client {self.client_id} received:"
+        self.logger.logdbg((f"Client: {self.client_id} thread: {self.thread_id} received:"
                             f" topic: {msg.topic},"
                             f" QOS: {int(msg.qos)},"
                             f" retain: {msg.retain},"
@@ -402,8 +404,9 @@ class MQTTResponder(weewx.engine.StdService):
                             f" properties: {msg.properties}"))            
 
         if not hasattr(msg.properties,'UserProperty'):
-            self.logger.logerr(f'Client {self.client_id} has no "UserProperty"')
-            self.logger.logerr(f'Client {self.client_id}'
+            self.logger.logerr((f'Client: {self.client_id} thread: {self.thread_id}'
+                                ' has no "UserProperty"'))
+            self.logger.logerr(f'Client: {self.client_id} thread: {self.thread_id}'
                                f' skipping topic: {msg.topic} payload: {msg.payload}')
             return
 
@@ -415,17 +418,19 @@ class MQTTResponder(weewx.engine.StdService):
                 break
 
         if not data_binding:
-            self.logger.logerr(f'Client {self.client_id} has no "data_binding" '
+            self.logger.logerr(f'Client: {self.client_id} thread: {self.thread_id}'
+                               ' has no "data_binding" '
                                f' UserProperty: {msg.properties.UserProperty}')
-            self.logger.logerr(f'Client {self.client_id}'
+            self.logger.logerr(f'Client: {self.client_id} thread: {self.thread_id}'
                                f' skipping topic: {msg.topic}'
                                f' UserProperty: {msg.properties.UserProperty}'
                                f' payload: {msg.payload}')
             return
 
         if data_binding not in self.data_bindings:
-            self.logger.logerr(f'Client {self.client_id} has unknown data_binding {data_binding}')
-            self.logger.logerr(f'Client {self.client_id}'
+            self.logger.logerr(f'Client: {self.client_id} thread: {self.thread_id}'
+                               f' has unknown data_binding {data_binding}')
+            self.logger.logerr(f'Client: {self.client_id} thread: {self.thread_id}'
                                f' skipping topic: {msg.topic}'
                                f' UserProperty: {msg.properties.UserProperty}'
                                f' payload: {msg.payload}')
@@ -445,7 +450,7 @@ class MQTTResponder(weewx.engine.StdService):
                 'data_binding': data_binding,
                 'properties': properties}
         self.data_queue.put(data)
-        self.logger.logdbg(f'Client {self.client_id} submitted:'
+        self.logger.logdbg(f'Client: {self.client_id} thread: {self.thread_id} submitted:'
                            f' {data_binding} {response_topic} queued: {data}')
 
 class MQTTResponderThread(threading.Thread):
@@ -461,6 +466,7 @@ class MQTTResponderThread(threading.Thread):
                  keepalive,
                  publish_qos):
         threading.Thread.__init__(self)
+        self.thread_id = threading.get_native_id()
         self.logger = logger
         self.data_queue = data_queue
         self.config_dict = config_dict
@@ -506,7 +512,8 @@ class MQTTResponderThread(threading.Thread):
         while True:
             data = self.data_queue.get()
             if data:
-                self.logger.logdbg(f"In MQTTResponderThread.run data: {data}")
+                self.logger.logdbg((f"Client: {self.client_id} thread: {self.thread_id}"
+                                    f" In MQTTResponderThread.run data: {data}"))
 
                 self.mqtt_client.connect(self.host, self.port, self.keepalive)
 
@@ -515,7 +522,8 @@ class MQTTResponderThread(threading.Thread):
                                                     .genBatchRecords(data['start_timestamp']):
                     record_count += 1
                     payload = json.dumps(record)
-                    self.logger.logdbg((f'Client {self.client_id} {data["topic"]}'
+                    self.logger.logdbg((f'Client: {self.client_id} thread: {self.thread_id}'
+                                        f' {data["topic"]}'
                                         f' {data["data_binding"]}'
                                         f' publishing is: {payload}.'))
                     mqtt_message_info = self.mqtt_client.publish(data['topic'],
@@ -523,13 +531,15 @@ class MQTTResponderThread(threading.Thread):
                                                                  self.publish_qos,
                                                                  False,
                                                                  properties=data['properties'])
-                    self.logger.logdbg((f"Client {self.client_id} {data['topic']}"
+                    self.logger.logdbg((f"Client: {self.client_id} thread: {self.thread_id}"
+                                        f" {data['topic']}"
                                         f"  published {mqtt_message_info.mid} {self.publish_qos}"))
                     self.mids[mqtt_message_info.mid] = {}
                     self.mids[mqtt_message_info.mid]['time_stamp'] = time.time()
                     self.mids[mqtt_message_info.mid]['qos'] = self.publish_qos
 
-                self.logger.loginf((f"Client {self.client_id} {data['topic']} {data['properties']}"
+                self.logger.loginf((f"Client: {self.client_id} thread: {self.thread_id}"
+                                    f" {data['topic']} {data['properties']}"
                                     f"  published {record_count} records."))
                 # Wait for all messages to be published
                 if len(self.mids) > 0:
@@ -549,9 +559,9 @@ class MQTTResponderThread(threading.Thread):
             qos = self.mids[mid]['qos']
             del self.mids[mid]
         if len(self.mids) > 0:
-            self.logger.logdbg((f"Client {self.client_id}:"
+            self.logger.logdbg((f"Client: {self.client_id} thread: {self.thread_id}"
                                 f" Published (int(time.time())): {time_stamp} {mid} {qos}"))
-            self.logger.logdbg((f"Client {self.client_id}:"
+            self.logger.logdbg((f"Client: {self.client_id} thread: {self.thread_id}"
                                 f" Inflight ({int(time.time())}): {self.mids}"))
         else:
             self.mqtt_client.disconnect()
@@ -568,6 +578,7 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
     ''' The "client" class that data ts replicated to. '''
     def __init__(self, config_dict, _engine):
         self.logger = Logger()
+        self.thread_id = threading.get_native_id()
         stn_dict = config_dict['MQTTReplicate']['Requester']
 
         self.the_time = time.time()
@@ -648,7 +659,8 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
 
         self.mqtt_client.loop_start()
 
-        self.logger.loginf("Waiting for MQTT subscription.")
+        self.logger.loginf(f"Client {self.client_id}: Thread: {self.thread_id}"
+                           f" Waiting for MQTT subscription.")
         while not self.subscribed:
             time.sleep(1)
 
@@ -702,7 +714,7 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
             except queue.Empty:
                 tries += 1
                 if tries >= max_tries:
-                    self.logger.loginf((f"Client {self.client_id}:"
+                    self.logger.loginf((f"Client {self.client_id}: Thread: {self.thread_id}"
                                         f" After {tries} with a wait of {wait_before_retry},"
                                         " queue is still empty."))
                     break
@@ -737,7 +749,7 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
                                                         qos,
                                                         False,
                                                         properties=properties)
-        self.logger.loginf((f"Client {self.client_id}"
+        self.logger.loginf((f"Client {self.client_id}: Thread: {self.thread_id}"
                             f"  topic ({topic}):"            
                             f"  data_binding ({data_binding_name}):"
                             f"  publishing ({last_ts}):"
@@ -746,14 +758,14 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
 
     def _on_connect(self, _userdata):
         (result, mid) = self.mqtt_client.subscribe(self.response_topic, self.subscribe_qos)
-        self.logger.loginf((f"Client {self.client_id}"
+        self.logger.loginf((f"Client {self.client_id}: Thread: {self.thread_id}"
                          f" subscribing to {self.response_topic}"
                          f" has a mid {int(mid)}"
                          f" and rc {int(result)}"))
         self.response_topic_mid = mid
 
         (result, mid) = self.mqtt_client.subscribe(self.archive_topic, self.subscribe_qos)
-        self.logger.loginf((f"Client {self.client_id}"
+        self.logger.loginf((f"Client {self.client_id}: Thread: {self.thread_id}"
                          f" subscribing to {self.archive_topic}"
                          f" has a mid {int(mid)}"
                          f" and rc {int(result)}"))
@@ -767,7 +779,8 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
         if rc == 0:
             for data_binding_name, data_binding in self.data_bindings.items():
                 data_binding['dbmanager'].close()
-                self.logger.logdbg(f"Client {self.client_id} closed db {data_binding_name}.")
+                self.logger.logdbg(f"Client {self.client_id}: Thread: {self.thread_id}"
+                                   f" closed db {data_binding_name}.")
 
     def _on_log(self, _client, _userdata, level, msg):
         self.mqtt_logger[level](f"Client {self.client_id} MQTT log: {msg}")
@@ -775,7 +788,7 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
     def _on_message(self, _userdata, msg):
         # ToDo: Fine tune exception handling
         try:
-            self.logger.logdbg((f"Client {self.client_id}:"
+            self.logger.logdbg((f"Client {self.client_id}: Thread: {self.thread_id}"
                                 f" topic: {msg.topic},"
                                 f" QOS: {int(msg.qos)},"
                                 f" retain: {msg.retain},"
@@ -783,8 +796,9 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
                                 f" properties: {msg.properties}"))
 
             if not hasattr(msg.properties,'UserProperty'):
-                self.logger.logerr(f'Client {self.client_id} has no "UserProperty"')
-                self.logger.logerr(f'Client {self.client_id}'
+                self.logger.logerr((f'Client {self.client_id}: Thread: {self.thread_id}'
+                                    ' has no "UserProperty"'))
+                self.logger.logerr(f'Client {self.client_id}: Thread: {self.thread_id}'
                                    f' skipping topic: {msg.topic} payload: {msg.payload}')
                 return
 
@@ -796,15 +810,16 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
                     break
 
             if not data_binding:
-                self.logger.logerr(f'Client {self.client_id} has no "data_binding" UserProperty')
-                self.logger.logerr(f'Client {self.client_id}'
+                self.logger.logerr((f'Client {self.client_id}: Thread: {self.thread_id}'
+                                    ' has no "data_binding" UserProperty'))
+                self.logger.logerr(f'Client {self.client_id}: Thread: {self.thread_id}'
                                    f' skipping topic: {msg.topic} payload: {msg.payload}')
                 return
 
             if data_binding not in self.data_bindings:
-                self.logger.logerr((f'Client {self.client_id}'
+                self.logger.logerr((f'Client {self.client_id}: Thread: {self.thread_id}'
                                     f' has unknown data_binding {data_binding}'))
-                self.logger.logerr(f'Client {self.client_id}'
+                self.logger.logerr(f'Client {self.client_id}: Thread: {self.thread_id}'
                                    f' skipping topic: {msg.topic} payload: {msg.payload}')
                 return
 
@@ -815,8 +830,10 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
             else:
                 self.data_bindings[data_binding]['dbmanager'].addRecord(record)
         except Exception as exception: # (want to catch all ) pylint: disable=broad-exception-caught
-            self.logger.logerr(f"Failed with {type(exception)} and reason {exception}.")
-            self.logger.logerr(f"{traceback.format_exc()}")
+            self.logger.logerr((f"Client {self.client_id}: Thread: {self.thread_id}"
+                                f" Failed with {type(exception)} and reason {exception}."))
+            self.logger.logerr((f"Client {self.client_id}: Thread: {self.thread_id}"
+                                f" {traceback.format_exc()}"))
             self.exception = exception
 
     def _on_subscribe(self, _userdata, mid):
