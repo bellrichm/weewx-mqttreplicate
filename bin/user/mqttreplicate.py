@@ -283,6 +283,7 @@ class MQTTResponder(weewx.engine.StdService):
         self.subscribe_qos = to_int(service_dict.get('subscribe_qos', 1))
         self.publish_qos = to_int(service_dict.get('publish_qos', 1))
         self.max_responder_threads = service_dict.get('max_responder_threads', 1)
+        log_mqtt = to_bool(service_dict.get('log_mqtt', False))
 
         self.data_bindings = {}
         for data_binding_name, data_binding in service_dict[instance_name].items():
@@ -296,14 +297,6 @@ class MQTTResponder(weewx.engine.StdService):
                 weewx.manager.open_manager(manager_dict)
             if self.data_bindings[data_binding_key]['type'] == 'main':
                 self.main_data_binding = data_binding_key
-
-        self.mqtt_logger = {
-            paho.mqtt.client.MQTT_LOG_INFO: self.logger.loginf,
-            paho.mqtt.client.MQTT_LOG_NOTICE: self.logger.loginf,
-            paho.mqtt.client.MQTT_LOG_WARNING: self.logger.loginf,
-            paho.mqtt.client.MQTT_LOG_ERR: self.logger.loginf,
-            paho.mqtt.client.MQTT_LOG_DEBUG: self.logger.loginf
-        }
 
         self.bind(weewx.NEW_ARCHIVE_RECORD, self.new_archive_record)
 
@@ -324,13 +317,18 @@ class MQTTResponder(weewx.engine.StdService):
 
         self.mqtt_client = MQTTClient.get_client(self.logger, self.client_id, None)
 
-        self.mqtt_client.on_connect = self._on_connect
-        if service_dict.get('log_mqtt', False):
-            self.mqtt_client.on_log = self._on_log
-        self.mqtt_client.on_message = self._on_message
-
-        self.mqtt_client.connect(host, port, keepalive)
-        self.mqtt_client.loop_start()
+        loop_thread = MQTTResponderLoopThread(self.logger,
+                                              self.mqtt_client,
+                                              self.client_id,
+                                              log_mqtt,
+                                              self.data_queue,
+                                              self.data_bindings,
+                                              self.request_topic,
+                                              self.subscribe_qos,
+                                              host,
+                                              port,
+                                              keepalive)
+        loop_thread.start()
 
     def shutDown(self):
         self.logger.loginf(f'Client: {self.client_id} thread: {self.thread_id} shutting down.')
@@ -338,7 +336,7 @@ class MQTTResponder(weewx.engine.StdService):
             data_binding['dbmanager'].close()
 
         self.mqtt_client.disconnect()
-        self.mqtt_client.loop_stop()
+        #self.mqtt_client.loop_stop()
 
         for i in range(self.max_responder_threads):
             self.data_queue.put(None)
@@ -383,6 +381,47 @@ class MQTTResponder(weewx.engine.StdService):
         self.logger.logdbg((f"Client: {self.client_id} thread: {self.thread_id}"
                             f" binding {data_binding_name}"
                             f" {mqtt_message_info.mid} {qos} {self.archive_topic}"))
+
+class MQTTResponderLoopThread(threading.Thread):
+    ''' The MQTT 'loop' thread. '''
+    def __init__(self,
+                 logger,
+                 mqtt_client,
+                 client_id,
+                 log_mqtt,
+                 data_queue,
+                 data_bindings,
+                 request_topic,
+                 subscribe_qos,
+                 host,
+                 port,
+                 keepalive):
+        threading.Thread.__init__(self)
+        self.logger = logger
+        self.mqtt_client = mqtt_client
+        self.client_id = client_id
+        self.data_queue = data_queue
+        self.data_bindings = data_bindings
+        self.request_topic = request_topic
+        self.subscribe_qos = subscribe_qos
+
+        self.mqtt_client.on_connect = self._on_connect
+        if log_mqtt:
+            self.mqtt_client.on_log = self._on_log
+        self.mqtt_client.on_message = self._on_message
+
+        self.mqtt_logger = {
+            paho.mqtt.client.MQTT_LOG_INFO: self.logger.loginf,
+            paho.mqtt.client.MQTT_LOG_NOTICE: self.logger.loginf,
+            paho.mqtt.client.MQTT_LOG_WARNING: self.logger.loginf,
+            paho.mqtt.client.MQTT_LOG_ERR: self.logger.loginf,
+            paho.mqtt.client.MQTT_LOG_DEBUG: self.logger.loginf
+        }
+        mqtt_client.connect(host, port, keepalive)
+
+    def run(self):
+        self.thread_id = threading.get_native_id()
+        self.mqtt_client.loop_forever()
 
     def _on_connect(self, _userdata):
         (result, mid) = self.mqtt_client.subscribe(self.request_topic, self.subscribe_qos)
@@ -729,7 +768,7 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
     def closePort(self):
         """Run when an engine shutdown is requested."""
         self.mqtt_client.disconnect()
-        self.mqtt_client.loop_stop()
+        #self.mqtt_client.loop_stop()
 
     def request_records(self, data_binding_name, qos, topic, last_ts):
         ''' Request the missing data. '''
@@ -795,6 +834,7 @@ class MQTTRequesterLoopThread(threading.Thread):
         self.mqtt_client.on_subscribe = self._on_subscribe
 
         self.mqtt_client.connect(host, port, keepalive)
+
     def run(self):
         self.thread_id = threading.get_native_id()
         self.mqtt_client.loop_forever()
