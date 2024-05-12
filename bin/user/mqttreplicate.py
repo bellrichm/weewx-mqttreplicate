@@ -1,5 +1,10 @@
+#
+#    Copyright (c) 2020-2024 Rich Bell <bellrichm@gmail.com>
+#
+#    See the file LICENSE.txt for your full rights.
+#
 ''' Replicate WeeWX dstabases using MQTT request/response functionality.'''
-# pylint: disable=fixme, too-many-instance-attributes, too-many-arguments
+# pylint: disable=fixme, too-many-lines, too-many-instance-attributes, too-many-arguments
 import abc
 import argparse
 import json
@@ -288,8 +293,10 @@ class MQTTResponder(weewx.engine.StdService):
 
         self.data_queue = queue.Queue()
         self.threads = []
+        self.thread_error = False
         for _i in range(self.max_responder_threads):
             thread = MQTTResponderThread(self.logger,
+                                         self.thread_error,
                                          self.data_queue,
                                          delta,
                                          config_dict,
@@ -322,18 +329,30 @@ class MQTTResponder(weewx.engine.StdService):
             data_binding['dbmanager'].close()
 
         self.mqtt_client.disconnect()
+        self.loop_thread.join(20.0)
+        if self.loop_thread.is_alive():
+            self.logger.logerr(f"Unable to shut down {self.loop_thread.native_id} thread")
+        else:
+            self.logger.loginf(f"Shut down {self.loop_thread.native_id} thread")
 
         for i in range(self.max_responder_threads):
             self.data_queue.put(None)
 
         for i in range(self.max_responder_threads):
-            self.threads[i].join()
+            self.threads[i].join(20)
+        if self.threads[i].is_alive():
+            self.logger.logerr(f"Unable to shut down {self.threads[i].native_id} thread")
+        else:
+            self.logger.loginf(f"Shut down {self.threads[i].native_id} thread")
 
     def new_archive_record(self, event):
         ''' Handle the new_archive_record event.'''
         if not self.loop_thread.is_alive():
             raise ThreadError(f'Client: {self.client_id} thread: {self.thread_id}'
-                              ' loop threaded abnormally ended')
+                              ' Loop thread abnormally ended')
+        if self.thread_error:
+            raise ThreadError(f'Client: {self.client_id} thread: {self.thread_id}'
+                              ' A thread pool thread abnormally ended.')          
         for data_binding_name, data_binding in self.data_bindings.items():
             if data_binding['type'] == 'main':
                 continue
@@ -485,6 +504,7 @@ class MQTTResponderThread(threading.Thread):
     '''  Publish the requested data. '''
     def __init__(self,
                  logger,
+                 thread_error,
                  data_queue,
                  delta,
                  config_dict,
@@ -496,6 +516,7 @@ class MQTTResponderThread(threading.Thread):
         threading.Thread.__init__(self)
         self.thread_id = threading.get_native_id()
         self.logger = logger
+        self.thread_error = thread_error
         self.data_queue = data_queue
         self.config_dict = config_dict
         self.host = host
