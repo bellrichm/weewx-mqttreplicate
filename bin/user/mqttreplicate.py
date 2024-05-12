@@ -72,14 +72,6 @@ class MQTTClient(abc.ABC):
         ''' Connect to the MQTT server. '''
         raise NotImplementedError("Method 'loop_forever' is not implemented")
 
-    def loop_start(self):
-        ''' Connect to the MQTT server. '''
-        raise NotImplementedError("Method 'loop_start' is not implemented")
-
-    def loop_stop(self):
-        ''' Connect to the MQTT server. '''
-        raise NotImplementedError("Method 'loop_stop' is not implemented")
-
     def subscribe(self, topic, qos):
         ''' Subscribe to the MQTT topic. '''
         raise NotImplementedError("Method 'subscribe' is not implemented")
@@ -200,29 +192,6 @@ class MQTTClientV2(MQTTClient):
         else:
             self.client.on_subscribe = None
 
-    # The wrappers of the  client methods are next
-
-    def connect(self, host, port, keepalive):
-        self.client.connect(host, port, keepalive)
-
-    def disconnect(self):
-        self.client.disconnect()
-
-    def loop_forever(self):
-        self.client.loop_forever()
-
-    def loop_start(self):
-        self.client.loop_start()
-
-    def loop_stop(self):
-        self.client.loop_stop()
-
-    def publish(self, topic, data, qos, retain, properties=None):
-        return self.client.publish(topic, data, qos, retain, properties)
-
-    def subscribe(self, topic, qos):
-        return self.client.subscribe(topic, qos)
-
     # The  wrappers of the callbacks are next
 
     def _client_on_connect(self, _client, userdata, flags, reason_code, _properties):
@@ -253,6 +222,23 @@ class MQTTClientV2(MQTTClient):
 
     def _client_on_subscribe(self, _client, userdata, mid, _reason_code_list, _properties):
         self._on_subscribe(userdata, mid)
+
+    # The wrappers of the  client methods are next
+
+    def connect(self, host, port, keepalive):
+        self.client.connect(host, port, keepalive)
+
+    def disconnect(self):
+        self.client.disconnect()
+
+    def loop_forever(self):
+        self.client.loop_forever()
+
+    def publish(self, topic, data, qos, retain, properties=None):
+        return self.client.publish(topic, data, qos, retain, properties)
+
+    def subscribe(self, topic, qos):
+        return self.client.subscribe(topic, qos)
 
 class MQTTResponder(weewx.engine.StdService):
     ''' The "server" that sends the replication data to the requester/client. '''
@@ -317,7 +303,7 @@ class MQTTResponder(weewx.engine.StdService):
 
         self.mqtt_client = MQTTClient.get_client(self.logger, self.client_id, None)
 
-        loop_thread = MQTTResponderLoopThread(self.logger,
+        self.loop_thread = MQTTResponderLoopThread(self.logger,
                                               self.mqtt_client,
                                               self.client_id,
                                               log_mqtt,
@@ -328,7 +314,7 @@ class MQTTResponder(weewx.engine.StdService):
                                               host,
                                               port,
                                               keepalive)
-        loop_thread.start()
+        self.loop_thread.start()
 
     def shutDown(self):
         self.logger.loginf(f'Client: {self.client_id} thread: {self.thread_id} shutting down.')
@@ -336,7 +322,6 @@ class MQTTResponder(weewx.engine.StdService):
             data_binding['dbmanager'].close()
 
         self.mqtt_client.disconnect()
-        #self.mqtt_client.loop_stop()
 
         for i in range(self.max_responder_threads):
             self.data_queue.put(None)
@@ -346,6 +331,9 @@ class MQTTResponder(weewx.engine.StdService):
 
     def new_archive_record(self, event):
         ''' Handle the new_archive_record event.'''
+        if not self.loop_thread.is_alive():
+            raise ThreadError(f'Client: {self.client_id} thread: {self.thread_id}'
+                              ' loop threaded abnormally ended')
         for data_binding_name, data_binding in self.data_bindings.items():
             if data_binding['type'] == 'main':
                 continue
@@ -397,6 +385,7 @@ class MQTTResponderLoopThread(threading.Thread):
                  port,
                  keepalive):
         threading.Thread.__init__(self)
+        self.thread_id = 0
         self.logger = logger
         self.mqtt_client = mqtt_client
         self.client_id = client_id
@@ -768,7 +757,6 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
     def closePort(self):
         """Run when an engine shutdown is requested."""
         self.mqtt_client.disconnect()
-        #self.mqtt_client.loop_stop()
 
     def request_records(self, data_binding_name, qos, topic, last_ts):
         ''' Request the missing data. '''
@@ -806,6 +794,7 @@ class MQTTRequesterLoopThread(threading.Thread):
                  port,
                  keepalive):
         threading.Thread.__init__(self)
+        self.thread_id = 0
         self.logger = logger
         self.mqtt_client = mqtt_client
         self.client_id = client_id
