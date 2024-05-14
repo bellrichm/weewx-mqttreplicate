@@ -559,41 +559,50 @@ class MQTTResponderThread(threading.Thread):
             data_binding['dbmanager'] = weewx.manager.open_manager(data_binding['manager_dict'])
 
         while True:
-            data = self.data_queue.get()
-            if data:
-                self.logger.logdbg((f"Client: {self.client_id} thread: {self.thread_id}"
-                                    f" In MQTTResponderThread.run data: {data}"))
-
-                self.mqtt_client.connect(self.host, self.port, self.keepalive)
-
-                record_count = 0
-                for record in self.data_bindings[data['data_binding']]['dbmanager']\
-                                                    .genBatchRecords(data['start_timestamp']):
-                    record_count += 1
-                    payload = json.dumps(record)
-                    self.logger.logdbg((f'Client: {self.client_id} thread: {self.thread_id}'
-                                        f' {data["topic"]}'
-                                        f' {data["data_binding"]}'
-                                        f' publishing is: {payload}.'))
-                    mqtt_message_info = self.mqtt_client.publish(data['topic'],
-                                                                 payload,
-                                                                 self.publish_qos,
-                                                                 False,
-                                                                 properties=data['properties'])
+            try:
+                data = self.data_queue.get()
+                if data:
                     self.logger.logdbg((f"Client: {self.client_id} thread: {self.thread_id}"
-                                        f" {data['topic']}"
-                                        f"  published {mqtt_message_info.mid} {self.publish_qos}"))
-                    self.mids[mqtt_message_info.mid] = {}
-                    self.mids[mqtt_message_info.mid]['time_stamp'] = time.time()
-                    self.mids[mqtt_message_info.mid]['qos'] = self.publish_qos
+                                        f" In MQTTResponderThread.run data: {data}"))
 
-                self.logger.loginf((f"Client: {self.client_id} thread: {self.thread_id}"
-                                    f" {data['topic']} {data['properties']}"
-                                    f"  published {record_count} records."))
-                # Wait for all messages to be published
-                if len(self.mids) > 0:
-                    self.mqtt_client.loop_forever()
-            else:
+                    self.mqtt_client.connect(self.host, self.port, self.keepalive)
+
+                    record_count = 0
+                    for record in self.data_bindings[data['data_binding']]['dbmanager']\
+                                                        .genBatchRecords(data['start_timestamp']):
+                        record_count += 1
+                        payload = json.dumps(record)
+                        self.logger.logdbg((f'Client: {self.client_id} thread: {self.thread_id}'
+                                            f' {data["topic"]}'
+                                            f' {data["data_binding"]}'
+                                            f' publishing is: {payload}.'))
+                        mqtt_message_info = self.mqtt_client.publish(data['topic'],
+                                                                     payload,
+                                                                     self.publish_qos,
+                                                                     False,
+                                                                     properties=data['properties'])
+                        self.logger.logdbg((f"Client: {self.client_id} thread: {self.thread_id}"
+                                            f" {data['topic']}"
+                                            f"  published {mqtt_message_info.mid}"
+                                            " {self.publish_qos}"))
+                        self.mids[mqtt_message_info.mid] = {}
+                        self.mids[mqtt_message_info.mid]['time_stamp'] = time.time()
+                        self.mids[mqtt_message_info.mid]['qos'] = self.publish_qos
+
+                    self.logger.loginf((f"Client: {self.client_id} thread: {self.thread_id}"
+                                        f" {data['topic']} {data['properties']}"
+                                        f"  published {record_count} records."))
+                    # Wait for all messages to be published
+                    if len(self.mids) > 0:
+                        self.mqtt_client.loop_forever()
+                else:
+                    break
+            except Exception as exception:# (want to catch all ) pylint: disable=broad-exception-caught
+                self.logger.logerr((f"Client {self.client_id}: Thread: {self.thread_id}"
+                                    f" Failed with {type(exception)} and reason {exception}."))
+                self.logger.logerr((f"Client {self.client_id}: Thread: {self.thread_id}"
+                                    f" {traceback.format_exc()}"))
+                self.thread_error = True
                 break
 
         for _data_binding_key, data_binding in self.data_bindings.items():
