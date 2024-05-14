@@ -443,62 +443,69 @@ class MQTTResponderLoopThread(threading.Thread):
                                 f" MQTT log: {msg}")
 
     def _on_message(self, _userdata, msg):
-        self.logger.logdbg((f"Client: {self.client_id} thread: {self.thread_id} received:"
-                            f" topic: {msg.topic},"
-                            f" QOS: {int(msg.qos)},"
-                            f" retain: {msg.retain},"
-                            f" payload: {msg.payload},"
-                            f" properties: {msg.properties}"))            
+        try:
+            self.logger.logdbg((f"Client: {self.client_id} thread: {self.thread_id} received:"
+                                f" topic: {msg.topic},"
+                                f" QOS: {int(msg.qos)},"
+                                f" retain: {msg.retain},"
+                                f" payload: {msg.payload},"
+                                f" properties: {msg.properties}"))            
 
-        if not hasattr(msg.properties,'UserProperty'):
-            self.logger.logerr((f'Client: {self.client_id} thread: {self.thread_id}'
-                                ' has no "UserProperty"'))
-            self.logger.logerr(f'Client: {self.client_id} thread: {self.thread_id}'
-                               f' skipping topic: {msg.topic} payload: {msg.payload}')
-            return
+            if not hasattr(msg.properties,'UserProperty'):
+                self.logger.logerr((f'Client: {self.client_id} thread: {self.thread_id}'
+                                    ' has no "UserProperty"'))
+                self.logger.logerr(f'Client: {self.client_id} thread: {self.thread_id}'
+                                   f' skipping topic: {msg.topic} payload: {msg.payload}')
+                return
 
-        user_property = msg.properties.UserProperty
-        data_binding = None
-        for keyword_value in user_property:
-            if keyword_value[0] == 'data_binding':
-                data_binding = keyword_value[1]
-                break
+            user_property = msg.properties.UserProperty
+            data_binding = None
+            for keyword_value in user_property:
+                if keyword_value[0] == 'data_binding':
+                    data_binding = keyword_value[1]
+                    break
 
-        if not data_binding:
-            self.logger.logerr(f'Client: {self.client_id} thread: {self.thread_id}'
-                               ' has no "data_binding" '
-                               f' UserProperty: {msg.properties.UserProperty}')
-            self.logger.logerr(f'Client: {self.client_id} thread: {self.thread_id}'
-                               f' skipping topic: {msg.topic}'
-                               f' UserProperty: {msg.properties.UserProperty}'
-                               f' payload: {msg.payload}')
-            return
+            if not data_binding:
+                self.logger.logerr(f'Client: {self.client_id} thread: {self.thread_id}'
+                                   ' has no "data_binding" '
+                                   f' UserProperty: {msg.properties.UserProperty}')
+                self.logger.logerr(f'Client: {self.client_id} thread: {self.thread_id}'
+                                   f' skipping topic: {msg.topic}'
+                                   f' UserProperty: {msg.properties.UserProperty}'
+                                   f' payload: {msg.payload}')
+                return
 
-        if data_binding not in self.data_bindings:
-            self.logger.logerr(f'Client: {self.client_id} thread: {self.thread_id}'
-                               f' has unknown data_binding {data_binding}')
-            self.logger.logerr(f'Client: {self.client_id} thread: {self.thread_id}'
-                               f' skipping topic: {msg.topic}'
-                               f' UserProperty: {msg.properties.UserProperty}'
-                               f' payload: {msg.payload}')
-            return
+            if data_binding not in self.data_bindings:
+                self.logger.logerr(f'Client: {self.client_id} thread: {self.thread_id}'
+                                   f' has unknown data_binding {data_binding}')
+                self.logger.logerr(f'Client: {self.client_id} thread: {self.thread_id}'
+                                   f' skipping topic: {msg.topic}'
+                                   f' UserProperty: {msg.properties.UserProperty}'
+                                   f' payload: {msg.payload}')
+                return
 
-        response_topic = msg.properties.ResponseTopic
+            response_topic = msg.properties.ResponseTopic
 
-        properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
-        properties.UserProperty = [
-            ('data_binding', data_binding)
-            ]
+            properties = paho.mqtt.client.Properties(paho.mqtt.client.PacketTypes.PUBLISH)
+            properties.UserProperty = [
+                ('data_binding', data_binding)
+                ]
 
-        start_timestamp = int(msg.payload.decode('utf-8'))
+            start_timestamp = int(msg.payload.decode('utf-8'))
 
-        data = {'topic': response_topic,
-                'start_timestamp': start_timestamp,
-                'data_binding': data_binding,
-                'properties': properties}
-        self.data_queue.put(data)
-        self.logger.logdbg(f'Client: {self.client_id} thread: {self.thread_id} submitted:'
-                           f' {data_binding} {response_topic} queued: {data}')
+            data = {'topic': response_topic,
+                    'start_timestamp': start_timestamp,
+                    'data_binding': data_binding,
+                    'properties': properties}
+            self.data_queue.put(data)
+            self.logger.logdbg(f'Client: {self.client_id} thread: {self.thread_id} submitted:'
+                               f' {data_binding} {response_topic} queued: {data}')
+        except Exception as exception:# (want to catch all ) pylint: disable=broad-exception-caught
+            self.logger.logerr((f"Client {self.client_id}: Thread: {self.thread_id}"
+                                f" Failed with {type(exception)} and reason {exception}."))
+            self.logger.logerr((f"Client {self.client_id}: Thread: {self.thread_id}"
+                                f" {traceback.format_exc()}"))
+            self.mqtt_client.disconnect()
 
 class MQTTResponderThread(threading.Thread):
     '''  Publish the requested data. '''
