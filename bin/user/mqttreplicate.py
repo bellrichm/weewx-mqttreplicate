@@ -699,13 +699,11 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
             if timestamp:
                 next(iter(self.data_bindings.values()))['last_good_timestamp'] = timestamp
 
-        #self.exception = None
-
         self.mqtt_client = MQTTClient.get_client(self.logger, self.client_id, None)
 
         self.data_queue = queue.PriorityQueue()
 
-        loop_thread = MQTTRequesterLoopThread(self.logger,
+        self.loop_thread = MQTTRequesterLoopThread(self.logger,
                                               self.mqtt_client,
                                               self.client_id,
                                               log_mqtt,
@@ -717,11 +715,11 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
                                               host,
                                               port,
                                               keepalive)
-        loop_thread.start()
+        self.loop_thread.start()
 
         self.logger.loginf(f"Client {self.client_id}: Thread: {self.thread_id}"
                            f" Waiting for MQTT subscription.")
-        while not loop_thread.subscribed:
+        while not self.loop_thread.subscribed:
             time.sleep(1)
 
         # Request any possible missing records
@@ -781,8 +779,9 @@ class MQTTRequester(weewx.drivers.AbstractDevice):
 
     def genLoopPackets(self):
         while True:
-            #if self.exception:
-            #    raise ThreadError from self.exception
+            if not self.loop_thread.is_alive():
+                raise ThreadError(f'Client: {self.client_id} thread: {self.thread_id}'
+                                  ' Loop thread abnormally ended')
             sleep_time = self.the_time + self.loop_interval - time.time()
             if sleep_time > 0:
                 time.sleep(sleep_time)
@@ -944,7 +943,7 @@ class MQTTRequesterLoopThread(threading.Thread):
                                 f" Failed with {type(exception)} and reason {exception}."))
             self.logger.logerr((f"Client {self.client_id}: Thread: {self.thread_id}"
                                 f" {traceback.format_exc()}"))
-            #self.exception = exception
+            self.mqtt_client.disconnect()
 
     def _on_subscribe(self, _userdata, mid):
         if mid == self.response_topic_mid:
