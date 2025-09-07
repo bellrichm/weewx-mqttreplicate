@@ -5,6 +5,13 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal"
+        },
+        {
             "name": "request replicate",
             "type": "debugpy",
             "request": "launch",
@@ -13,10 +20,11 @@
             "justMyCode": false,
             "args": [
                 "request",
-                "--conf",  "~/weewx-data/run/weewx.conf",
+                "--conf",
+                "~/weewx-data/run/weewx.conf",
                 //"--timestamp", "0",
             ]
-        },        
+        },
         {
             "name": "respond replicate",
             "type": "debugpy",
@@ -26,18 +34,20 @@
             "justMyCode": false,
             "args": [
                 "respond",
-                "--conf",  "~/weewx-data/run/weewx.conf",
+                "--conf",
+                "~/weewx-data/run/weewx.conf",
             ]
         },
         {
             "name": "weewxd: Full install",
             "type": "debugpy",
-            "request": "launch",  
+            "request": "launch",
             "program": "~/weewx/src/weewxd.py",
             "args": [
-                "--config", "~/weewx-data/weewx.conf"
-            ],            
+                "--config",
+                "~/weewx-data/weewx.conf"
+            ],
             "console": "integratedTerminal"
-        },              
+        },
     ]
 }
