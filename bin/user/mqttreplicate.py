@@ -1,10 +1,9 @@
 #
-#    Copyright (c) 2024 Rich Bell <bellrichm@gmail.com>
+#    Copyright (c) 2025 Rich Bell <bellrichm@gmail.com>
 #
 #    See the file LICENSE.txt for your full rights.
 #
 ''' Replicate WeeWX dstabases using MQTT request/response functionality.'''
-# pylint: disable=fixme, too-many-lines, too-many-instance-attributes, too-many-arguments
 import abc
 import argparse
 import json
